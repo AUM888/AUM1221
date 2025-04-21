@@ -246,7 +246,7 @@ app.post(`/bot${token}`, (req, res) => {
 });
 
 bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id, `👋 Welcome to @moongraphi_bot
+  bot.sendMessage(msg.chat.id, `👋🚀 Welcome to @DivinePumpm_Bot
 💰 Trade  |  🔐 Wallet
 ⚙️ Filters  |  📊 Portfolio
 ❓ Help  |  🔄 Refresh`, {
