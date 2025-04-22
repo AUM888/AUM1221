@@ -1,106 +1,139 @@
+const axios = require('axios');
 const { Connection, PublicKey } = require('@solana/web3.js');
-const { getMint } = require('@solana/spl-token');
 
-const connection = new Connection('https://mainnet.helius-rpc.com/?api-key=' + process.env.HELIUS_API_KEY, { commitment: 'confirmed' });
+const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, { commitment: 'confirmed' });
 
-async function extractTokenInfo(tx) {
-  const tokenAddress = tx.tokenMint || tx.accounts?.[0] || tx.signature;
-  if (!tokenAddress) return null;
+const extractTokenInfo = async (event) => {
+  try {
+    console.log('extractTokenInfo called with event:', JSON.stringify(event, null, 2));
 
-  const maxRetries = 3;
-  let retryCount = 0;
+    let tokenAddress = event.tokenMint ||
+                      event.accounts?.find(acc => acc && acc.length >= 44 && acc.length <= 45) ||
+                      event.accountData?.flatMap(acc => acc.tokenBalanceChanges?.map(change => change.mint))
+                        .filter(mint => mint && [44, 45].includes(mint.length))[0];
 
-  while (retryCount < maxRetries) {
-    try {
-      // Fetch metadata from Helius API
-      const response = await fetch(
-        `https://api.helius.xyz/v0/tokens/metadata?api-key=${process.env.HELIUS_API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mintAccounts: [tokenAddress] })
-        }
-      );
-
-      if (response.status === 429) {
-        retryCount++;
-        const waitTime = Math.pow(2, retryCount) * 1000; // Exponential backoff: 2s, 4s, 8s
-        console.log(`Rate limit hit for ${tokenAddress}, retrying after ${waitTime}ms...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-        continue;
-      }
-
-      if (!response.ok) throw new Error(`Helius API error: ${response.status} - ${await response.text()}`);
-      const data = await response.json();
-      const metadata = data[0] || {};
-
-      // Fetch additional data using Solana RPC
-      const mintPublicKey = new PublicKey(tokenAddress);
-      const mintInfo = await getMint(connection, mintPublicKey);
-      const supply = mintInfo.supply.toNumber() / 10 ** mintInfo.decimals; // Total supply in tokens
-
-      // Estimate liquidity and market cap (simplified, needs real pool data)
-      // TODO: Replace with real pool data from Raydium or Orca for accurate liquidity/marketCap
-      const liquidity = metadata.liquidity || (supply * 0.01); // Assuming 1% of supply as liquidity
-      const marketCap = metadata.marketCap || (supply * 0.000005); // Using launch price as base
-
-      console.log('Fetched token data:', { metadata, mintInfo, liquidity, marketCap }); // Debug log
-
-      return {
-        name: metadata.name || `Token_${tokenAddress.slice(0, 8)}`,
-        address: tokenAddress,
-        liquidity: liquidity || null,
-        marketCap: marketCap || null,
-        devHolding: metadata.devHolding || null,
-        poolSupply: metadata.poolSupply || null,
-        launchPrice: metadata.price || 0.000005,
-        mintAuthRevoked: metadata.mintAuthorityRevoked || mintInfo.mintAuthority?.equals(PublicKey.default) || false,
-        freezeAuthRevoked: metadata.freezeAuthorityRevoked || mintInfo.freezeAuthority?.equals(PublicKey.default) || false,
-        mint: tokenAddress
-      };
-    } catch (error) {
-      console.error('Error extracting token info for', tokenAddress, ':', error);
-      if (retryCount === maxRetries - 1) {
-        return null; // Return null after max retries
-      }
-      retryCount++;
+    if (!tokenAddress) {
+      console.log('No token address found in event');
+      return null;
     }
-  }
-  return null;
-}
 
-function checkAgainstFilters(token, filters) {
-  if (!token || !token.liquidity || !token.devHolding || !token.poolSupply || !token.launchPrice) {
-    return false; // Skip if any critical data is missing
-  }
-  return (
-    token.liquidity >= filters.liquidity.min &&
-    token.liquidity <= filters.liquidity.max &&
-    token.devHolding >= filters.devHolding.min &&
-    token.devHolding <= filters.devHolding.max &&
-    token.poolSupply >= filters.poolSupply.min &&
-    token.poolSupply <= filters.poolSupply.max &&
-    token.launchPrice >= filters.launchPrice.min &&
-    token.launchPrice <= filters.launchPrice.max &&
-    (filters.mintAuthRevoked === false || token.mintAuthRevoked === true) &&
-    (filters.freezeAuthRevoked === false || token.freezeAuthRevoked === true)
-  );
-}
+    console.log('Fetching token data for address:', tokenAddress);
 
-function formatTokenMessage(token) {
-  return `
-🌟 *New Token Alert* 🌟
-📛 *Token Name*: ${token.name || 'Unknown'}
-📍 *Token Address*: \`${token.address || 'N/A'}\`
-💰 *Market Cap*: $${token.marketCap?.toLocaleString() || 'N/A'}
-💧 *Liquidity*: $${token.liquidity?.toLocaleString() || 'N/A'}
-👨‍💻 *Dev Holding*: ${token.devHolding ? token.devHolding + '%' : 'N/A'}
-🏊 *Pool Supply*: ${token.poolSupply ? token.poolSupply + '%' : 'N/A'}
-🚀 *Launch Price*: ${token.launchPrice ? token.launchPrice.toFixed(10) + ' SOL' : 'N/A'}
-🔒 *Mint Authority*: ${token.mintAuthRevoked ? '✅ Revoked' : '❌ Not Revoked'}
-🧊 *Freeze Authority*: ${token.freezeAuthRevoked ? '✅ Revoked' : '❌ Not Revoked'}
-📈 *DexScreener*: [View on DexScreener](https://dexscreener.com/solana/${token.address || ''})
-  `;
-}
+    // Fetch token metadata
+    let tokenData = { address: tokenAddress };
+    try {
+      const mint = await connection.getParsedAccountInfo(new PublicKey(tokenAddress));
+      console.log('Mint data fetched:', JSON.stringify(mint, null, 2));
+      if (!mint.value) {
+        console.log('No mint data found for:', tokenAddress);
+        return null;
+      }
+      tokenData.name = mint.value.data.parsed.info?.name || 'Unknown';
+      tokenData.decimals = mint.value.data.parsed.info.decimals || 9;
+      tokenData.mintAuthRevoked = !mint.value.data.parsed.info.mintAuthority;
+      tokenData.freezeAuthRevoked = !mint.value.data.parsed.info.freezeAuthority;
+    } catch (error) {
+      console.error('Error fetching mint data:', error.message);
+      tokenData.name = 'Unknown';
+      tokenData.mintAuthRevoked = false;
+      tokenData.freezeAuthRevoked = false;
+    }
+
+    // Fetch market data from DexScreener
+    try {
+      const dexResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`);
+      console.log('DexScreener response:', JSON.stringify(dexResponse.data, null, 2));
+      const pair = dexResponse.data.pairs?.[0];
+      if (pair) {
+        tokenData.name = pair.baseToken?.name || tokenData.name;
+        tokenData.marketCap = pair.fdv || 0;
+        tokenData.liquidity = pair.liquidity?.usd || 0;
+        tokenData.price = pair.priceUsd || 0;
+      }
+    } catch (error) {
+      console.error('Error fetching DexScreener data:', error.message);
+      tokenData.marketCap = 0;
+      tokenData.liquidity = 0;
+      tokenData.price = 0;
+    }
+
+    // Fetch dev holding and pool supply
+    try {
+      const largestAccounts = await connection.getTokenLargestAccounts(new PublicKey(tokenAddress));
+      console.log('Largest accounts:', JSON.stringify(largestAccounts, null, 2));
+      const totalSupply = (await connection.getTokenSupply(new PublicKey(tokenAddress))).value.uiAmount;
+      const devHolding = largestAccounts.value[0]?.uiAmount / totalSupply * 100 || 0;
+      tokenData.devHolding = devHolding;
+      tokenData.poolSupply = totalSupply ? (totalSupply - devHolding) / totalSupply * 100 : 0;
+    } catch (error) {
+      console.error('Error fetching token supply or accounts:', error.message);
+      tokenData.devHolding = 0;
+      tokenData.poolSupply = 0;
+    }
+
+    console.log('Final token data:', tokenData);
+    return tokenData;
+  } catch (error) {
+    console.error('extractTokenInfo error:', error.message, 'Stack:', error.stack);
+    return null;
+  }
+};
+
+const checkAgainstFilters = (tokenData, filters) => {
+  try {
+    console.log('Checking token data against filters:', tokenData, 'Filters:', filters);
+    const checks = [
+      { field: 'liquidity', value: tokenData.liquidity || 0, min: filters.liquidity.min, max: filters.liquidity.max },
+      { field: 'poolSupply', value: tokenData.poolSupply || 0, min: filters.poolSupply.min, max: filters.poolSupply.max },
+      { field: 'devHolding', value: tokenData.devHolding || 0, min: filters.devHolding.min, max: filters.devHolding.max },
+      { field: 'launchPrice', value: tokenData.price || 0, min: filters.launchPrice.min, max: filters.launchPrice.max },
+      { field: 'mintAuthRevoked', value: tokenData.mintAuthRevoked, expected: filters.mintAuthRevoked },
+      { field: 'freezeAuthRevoked', value: tokenData.freezeAuthRevoked, expected: filters.freezeAuthRevoked }
+    ];
+
+    for (const check of checks) {
+      if (check.field === 'mintAuthRevoked' || check.field === 'freezeAuthRevoked') {
+        if (check.value !== check.expected) {
+          console.log(`Filter failed: ${check.field}, Expected: ${check.expected}, Got: ${check.value}`);
+          return false;
+        }
+      } else {
+        if (check.value < check.min || check.value > check.max) {
+          console.log(`Filter failed: ${check.field}, Value: ${check.value}, Min: ${check.min}, Max: ${check.max}`);
+          return false;
+        }
+      }
+    }
+
+    console.log('Token passed all filters');
+    return true;
+  } catch (error) {
+    console.error('checkAgainstFilters error:', error.message);
+    return false;
+  }
+};
+
+const formatTokenMessage = (tokenData) => {
+  try {
+    console.log('Formatting token message for:', tokenData);
+    const message = `🌟 *New Token Alert* 🌟
+📛 *Token Name*: ${tokenData.name || 'Unknown'}
+📍 *Token Address*: \`${tokenData.address || 'N/A'}\`
+💰 *Market Cap*: $${tokenData.marketCap ? tokenData.marketCap.toLocaleString() : 'N/A'}
+💧 *Liquidity*: $${tokenData.liquidity ? tokenData.liquidity.toLocaleString() : 'N/A'}
+👨‍💻 *Dev Holding*: ${tokenData.devHolding ? tokenData.devHolding.toFixed(2) : 'N/A'}%
+🏊 *Pool Supply*: ${tokenData.poolSupply ? tokenData.poolSupply.toFixed(2) : 'N/A'}%
+🚀 *Launch Price*: ${tokenData.price ? tokenData.price : 'N/A'} SOL
+🔒 *Mint Authority*: ${tokenData.mintAuthRevoked ? '✅ Revoked' : '❌ Not Revoked'}
+🧊 *Freeze Authority*: ${tokenData.freezeAuthRevoked ? '✅ Revoked' : '❌ Not Revoked'}
+📈 *DexScreener*: [View on DexScreener](https://dexscreener.com/solana/${tokenData.address || ''})`;
+
+    console.log('Formatted message:', message);
+    return message;
+  } catch (error) {
+    console.error('formatTokenMessage error:', error.message);
+    return 'Error formatting token message';
+  }
+};
 
 module.exports = { extractTokenInfo, checkAgainstFilters, formatTokenMessage };
