@@ -1,48 +1,72 @@
 const axios = require('axios');
-const { extractTokenInfo, checkAgainstFilters, formatTokenMessage } = require('./Helper.function');
+const { Connection, PublicKey } = require('@solana/web3.js');
 
-async function checkNewTokens(bot, chatId, PUMP_FUN_PROGRAM, filters) {
+const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, { commitment: 'confirmed' });
+
+const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainstFilters) => {
   try {
-    const maxRetries = 3;
-    let retryCount = 0;
+    console.log('checkNewTokens started, PumpFunProgram:', pumpFunProgram.toString());
 
-    while (retryCount < maxRetries) {
-      try {
-        const response = await axios.get(
-          `https://api.helius.xyz/v0/addresses/${PUMP_FUN_PROGRAM.toBase58()}/transactions?api-key=${process.env.HELIUS_API_KEY}&limit=5`
-        );
-        const txs = response.data;
+    const transactions = await connection.getSignaturesForAddress(pumpFunProgram, { limit: 10 });
+    console.log('Transactions fetched:', transactions.length, 'Details:', JSON.stringify(transactions, null, 2));
 
-        for (let tx of txs) {
-          if (tx.type === 'TOKEN_MINT') { // Changed from CREATE to TOKEN_MINT
-            const tokenInfo = await extractTokenInfo(tx);
-            if (!tokenInfo) continue;
+    for (const tx of transactions) {
+      console.log('Processing transaction:', tx.signature);
+      const txDetails = await connection.getParsedTransaction(tx.signature, { commitment: 'confirmed' });
+      console.log('Transaction details:', JSON.stringify(txDetails, null, 2));
 
-            const passed = checkAgainstFilters(tokenInfo, filters);
-            if (passed) {
-              const message = formatTokenMessage(tokenInfo);
-              await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
-            }
-          }
-        }
-        return; // Exit if successful
-      } catch (err) {
-        if (err.response && err.response.status === 429) {
-          retryCount++;
-          const waitTime = Math.pow(2, retryCount) * 1000; // Exponential backoff: 2s, 4s, 8s
-          console.log(`Rate limit hit in checkNewTokens, retrying after ${waitTime}ms...`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-        } else {
-          console.error("Token check error:", err.message);
-          throw err;
-        }
+      if (!txDetails || txDetails.meta?.err) {
+        console.log('Skipping invalid or failed transaction:', tx.signature);
+        continue;
+      }
+
+      const tokenMint = txDetails.transaction.message.accountKeys.find(key => key.signer)?.pubkey;
+      if (!tokenMint) {
+        console.log('No token mint found in transaction:', tx.signature);
+        continue;
+      }
+
+      console.log('Token mint found:', tokenMint);
+
+      const event = {
+        type: 'CREATE',
+        tokenMint,
+        programId: pumpFunProgram.toString(),
+        accounts: txDetails.transaction.message.accountKeys.map(key => key.pubkey)
+      };
+
+      const { extractTokenInfo } = require('./Helper.function');
+      const tokenData = await extractTokenInfo(event);
+      console.log('Token data from checkNewTokens:', tokenData);
+
+      if (!tokenData) {
+        console.log('No valid token data for:', tokenMint);
+        bot.sendMessage(chatId, `⚠️ Failed to fetch data for token: ${tokenMint}`).catch(err => {
+          console.error('Failed to send Telegram message for failed token data:', err.message);
+        });
+        continue;
+      }
+
+      if (checkAgainstFilters(tokenData, filters)) {
+        console.log('Token passed filters in checkNewTokens:', tokenData);
+        const { formatTokenMessage } = require('./Helper.function');
+        const message = formatTokenMessage(tokenData);
+        await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' }).catch(err => {
+          console.error('Failed to send Telegram alert from checkNewTokens:', err.message, 'Message:', message);
+        });
+      } else {
+        console.log('Token did not pass filters in checkNewTokens:', tokenMint, 'Token data:', tokenData);
+        bot.sendMessage(chatId, `ℹ️ Token ${tokenMint} did not pass filters`).catch(err => {
+          console.error('Failed to send Telegram message for filter fail:', err.message);
+        });
       }
     }
-    console.error("Max retries reached in checkNewTokens");
-  } catch (err) {
-    console.error("Token check error:", err.message);
+  } catch (error) {
+    console.error('checkNewTokens error:', error.message, 'Stack:', error.stack);
+    bot.sendMessage(chatId, `❌ Error checking new tokens: ${error.message}`).catch(err => {
+      console.error('Failed to send Telegram error message:', err.message);
+    });
   }
-}
+};
 
-// Export for use in index.js
 module.exports = { checkNewTokens };
