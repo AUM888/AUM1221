@@ -3,8 +3,10 @@ const { Connection, PublicKey } = require('@solana/web3.js');
 
 const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, {
   commitment: 'confirmed',
-  maxSupportedTransactionVersion: 0 // Added to support version 0 transactions
+  maxSupportedTransactionVersion: 0
 });
+
+const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 
 const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainstFilters) => {
   try {
@@ -19,7 +21,7 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
       try {
         txDetails = await connection.getParsedTransaction(tx.signature, { 
           commitment: 'confirmed',
-          maxSupportedTransactionVersion: 0 // Explicitly set for this call
+          maxSupportedTransactionVersion: 0
         });
       } catch (error) {
         if (error.message.includes('Transaction version')) {
@@ -36,13 +38,29 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
         continue;
       }
 
-      const tokenMint = txDetails.transaction.message.accountKeys.find(key => key.signer)?.pubkey;
+      let tokenMint = txDetails.transaction.message.accountKeys.find(key => {
+        const accountInfo = txDetails.meta?.postTokenBalances?.find(balance => balance.accountIndex === txDetails.transaction.message.accountKeys.indexOf(key));
+        return accountInfo && accountInfo.mint && [44, 45].includes(accountInfo.mint.length);
+      })?.pubkey;
+
       if (!tokenMint) {
         console.log('No token mint found in transaction:', tx.signature);
         continue;
       }
 
       console.log('Token mint found:', tokenMint);
+
+      // Validate token mint
+      try {
+        const accountInfo = await connection.getParsedAccountInfo(new PublicKey(tokenMint));
+        if (!accountInfo.value || accountInfo.value.owner.toString() !== TOKEN_PROGRAM.toString()) {
+          console.log('Address is not a TOKEN mint account, skipping:', tokenMint);
+          continue;
+        }
+      } catch (error) {
+        console.error('Error validating token mint:', tokenMint, 'Error:', error.message);
+        continue;
+      }
 
       const event = {
         type: 'CREATE',
