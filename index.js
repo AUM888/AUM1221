@@ -30,7 +30,10 @@ const PORT = process.env.PORT || 10000;
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const chatId = process.env.TELEGRAM_CHAT_ID || '-1002511600127';
 const webhookBaseUrl = process.env.WEBHOOK_URL?.replace(/\/$/, '');
-const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, { commitment: 'confirmed' });
+const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, {
+  commitment: 'confirmed',
+  maxSupportedTransactionVersion: 0 // Added to support version 0 transactions
+});
 
 // Validate environment variables
 if (!token || !webhookBaseUrl || !process.env.HELIUS_API_KEY || !process.env.PRIVATE_KEY) {
