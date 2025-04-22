@@ -7,6 +7,7 @@ const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${pro
 });
 
 const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+const PUMP_FUN_PROGRAM = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
 
 const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainstFilters) => {
   try {
@@ -28,7 +29,8 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
           console.log('Skipping transaction due to unsupported version:', tx.signature);
           continue;
         }
-        throw error;
+        console.error('Error fetching transaction details:', error.message);
+        continue;
       }
 
       console.log('Transaction details:', JSON.stringify(txDetails, null, 2));
@@ -38,21 +40,35 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
         continue;
       }
 
-      let tokenMint = txDetails.transaction.message.accountKeys.find(key => {
-        const accountInfo = txDetails.meta?.postTokenBalances?.find(balance => balance.accountIndex === txDetails.transaction.message.accountKeys.indexOf(key));
-        return accountInfo && accountInfo.mint && [44, 45].includes(accountInfo.mint.length);
-      })?.pubkey;
+      // Find Pump.fun CREATE instruction
+      let tokenMint;
+      const createInstruction = txDetails.transaction.message.instructions.find(
+        inst => inst.programId.toString() === PUMP_FUN_PROGRAM.toString()
+      );
 
-      if (!tokenMint) {
-        console.log('No token mint found in transaction:', tx.signature);
+      if (!createInstruction) {
+        console.log('No Pump.fun CREATE instruction found in transaction:', tx.signature);
         continue;
       }
 
-      console.log('Token mint found:', tokenMint);
+      console.log('CREATE instruction found:', JSON.stringify(createInstruction, null, 2));
+
+      // Extract mint address from instruction accounts (typically the first account is the mint)
+      if (createInstruction.accounts && createInstruction.accounts.length > 0) {
+        tokenMint = createInstruction.accounts[0].toString();
+      }
+
+      console.log('Token mint extracted:', tokenMint);
+
+      if (!tokenMint || tokenMint.length < 44 || tokenMint.length > 45) {
+        console.log('Invalid token mint, skipping:', tokenMint);
+        continue;
+      }
 
       // Validate token mint
       try {
         const accountInfo = await connection.getParsedAccountInfo(new PublicKey(tokenMint));
+        console.log('Account info for mint:', tokenMint, JSON.stringify(accountInfo, null, 2));
         if (!accountInfo.value || accountInfo.value.owner.toString() !== TOKEN_PROGRAM.toString()) {
           console.log('Address is not a TOKEN mint account, skipping:', tokenMint);
           continue;
@@ -66,12 +82,12 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
         type: 'CREATE',
         tokenMint,
         programId: pumpFunProgram.toString(),
-        accounts: txDetails.transaction.message.accountKeys.map(key => key.pubkey)
+        accounts: txDetails.transaction.message.accountKeys.map(key => key.pubkey.toString())
       };
 
       const { extractTokenInfo } = require('./Helper.function');
       const tokenData = await extractTokenInfo(event);
-      console.log('Token data from checkNewTokens:', tokenData);
+      console.log('Token data from checkNewTokens:', JSON.stringify(tokenData, null, 2));
 
       if (!tokenData) {
         console.log('No valid token data for:', tokenMint);
