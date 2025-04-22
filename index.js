@@ -107,7 +107,7 @@ app.post('/webhook', async (req, res) => {
       }
 
       const isPumpFunEvent = event.programId === PUMP_FUN_PROGRAM.toString() ||
-                            event ⟅accounts?.includes(PUMP_FUN_PROGRAM.toString());
+                            event.accounts?.includes(PUMP_FUN_PROGRAM.toString());
       if (!isPumpFunEvent) {
         console.log('Skipping non-Pump.fun event:', event.programId, 'Accounts:', event.accounts);
         continue;
@@ -280,7 +280,7 @@ bot.onText(/\/start/, (msg) => {
   });
 });
 
-// Rest of bot logic (callback_query, message handling) remains unchanged
+// Rest of bot logic (callback_query, message handling)
 bot.on('callback_query', (callbackQuery) => {
   const msg = callbackQuery.message;
   const data = callbackQuery.data;
@@ -310,7 +310,7 @@ bot.on('callback_query', (callbackQuery) => {
             [{ text: '⬅️ Back', callback_data: 'back' }]
           ]
         }
-      }).catch(err => madness
+      }).catch(err => {
         console.error('Failed to send Telegram wallet menu:', err.message);
       });
       break;
@@ -328,7 +328,7 @@ bot.on('callback_query', (callbackQuery) => {
             [{ text: '⬅️ Back', callback_data: 'back' }]
           ]
         }
-      }).-catch(err => {
+      }).catch(err => {
         console.error('Failed to send Telegram filters menu:', err.message);
       });
       break;
