@@ -120,9 +120,14 @@ app.post('/webhook', async (req, res) => {
         continue;
       }
 
-      let tokenAddress = event.tokenMint ||
-                        event.accountData?.flatMap(acc => acc.tokenBalanceChanges?.map(change => change.mint))
-                          .filter(mint => mint && [44, 45].includes(mint.length))[0];
+      let tokenAddress;
+      if (event.tokenMint) {
+        tokenAddress = event.tokenMint;
+      } else if (event.accountData) {
+        const mints = event.accountData?.flatMap(acc => acc.tokenBalanceChanges?.map(change => change.mint))
+          .filter(mint => mint && [44, 45].includes(mint.length));
+        tokenAddress = mints?.[0];
+      }
 
       console.log('Token address extracted:', tokenAddress);
 
@@ -134,6 +139,7 @@ app.post('/webhook', async (req, res) => {
       // Validate token address is a mint account
       try {
         const accountInfo = await connection.getParsedAccountInfo(new PublicKey(tokenAddress));
+        console.log('Account info for token:', tokenAddress, JSON.stringify(accountInfo, null, 2));
         if (!accountInfo.value || accountInfo.value.owner.toString() !== TOKEN_PROGRAM.toString()) {
           console.log('Address is not a TOKEN mint account, skipping:', tokenAddress);
           continue;
@@ -194,6 +200,9 @@ app.post('/webhook', async (req, res) => {
     return res.status(200).send('OK');
   } catch (error) {
     console.error('Webhook error:', error.message, 'Stack:', error.stack);
+    bot.sendMessage(chatId, `❌ Webhook error: ${error.message}`).catch(err => {
+      console.error('Failed to send Telegram webhook error message:', err.message);
+    });
     return res.status(500).send('Internal Server Error');
   }
 });
