@@ -42,26 +42,12 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
 
       let tokenMint;
       // Find Pump.fun CREATE instruction
-      const createInstruction = txDetails.transaction.message.instructions.find(
-        inst => inst.programId.toString() === PUMP_FUN_PROGRAM.toString()
-      );
+      const createInstruction = txDetails.meta?.innerInstructions?.flatMap(inner => inner.instructions)
+        .find(inst => inst.parsed?.info?.newAccount && inst.parsed?.info?.owner === TOKEN_PROGRAM.toString());
 
       if (createInstruction) {
         console.log('CREATE instruction found:', JSON.stringify(createInstruction, null, 2));
-        // Pump.fun CREATE instruction typically has mint as the first account
-        if (createInstruction.accounts && createInstruction.accounts.length > 0) {
-          tokenMint = createInstruction.accounts[0].toString();
-        }
-      }
-
-      // Fallback to postTokenBalances if no CREATE instruction
-      if (!tokenMint && txDetails.meta?.postTokenBalances) {
-        const mintBalance = txDetails.meta.postTokenBalances.find(
-          balance => balance.mint && [44, 45].includes(balance.mint.length)
-        );
-        if (mintBalance) {
-          tokenMint = mintBalance.mint;
-        }
+        tokenMint = createInstruction.parsed.info.newAccount;
       }
 
       console.log('Token mint extracted:', tokenMint);
