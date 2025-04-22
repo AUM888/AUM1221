@@ -13,7 +13,7 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
   try {
     console.log('checkNewTokens started, PumpFunProgram:', pumpFunProgram.toString());
 
-    const transactions = await connection.getSignaturesForAddress(pumpFunProgram, { limit: 10 });
+    const transactions = await connection.getSignaturesForAddress(pumpFunProgram, { limit: 20 });
     console.log('Transactions fetched:', transactions.length, 'Details:', JSON.stringify(transactions, null, 2));
 
     for (const tx of transactions) {
@@ -29,7 +29,7 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
           console.log('Skipping transaction due to unsupported version:', tx.signature);
           continue;
         }
-        console.error('Error fetching transaction details:', error.message);
+        console.error('Error fetching transaction details:', error.message, 'Stack:', error.stack);
         continue;
       }
 
@@ -40,22 +40,28 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
         continue;
       }
 
-      // Find Pump.fun CREATE instruction
       let tokenMint;
+      // Find Pump.fun CREATE instruction
       const createInstruction = txDetails.transaction.message.instructions.find(
         inst => inst.programId.toString() === PUMP_FUN_PROGRAM.toString()
       );
 
-      if (!createInstruction) {
-        console.log('No Pump.fun CREATE instruction found in transaction:', tx.signature);
-        continue;
+      if (createInstruction) {
+        console.log('CREATE instruction found:', JSON.stringify(createInstruction, null, 2));
+        // Pump.fun CREATE instruction typically has mint as the first account
+        if (createInstruction.accounts && createInstruction.accounts.length > 0) {
+          tokenMint = createInstruction.accounts[0].toString();
+        }
       }
 
-      console.log('CREATE instruction found:', JSON.stringify(createInstruction, null, 2));
-
-      // Extract mint address from instruction accounts (typically the first account is the mint)
-      if (createInstruction.accounts && createInstruction.accounts.length > 0) {
-        tokenMint = createInstruction.accounts[0].toString();
+      // Fallback to postTokenBalances if no CREATE instruction
+      if (!tokenMint && txDetails.meta?.postTokenBalances) {
+        const mintBalance = txDetails.meta.postTokenBalances.find(
+          balance => balance.mint && [44, 45].includes(balance.mint.length)
+        );
+        if (mintBalance) {
+          tokenMint = mintBalance.mint;
+        }
       }
 
       console.log('Token mint extracted:', tokenMint);
@@ -74,7 +80,7 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
           continue;
         }
       } catch (error) {
-        console.error('Error validating token mint:', tokenMint, 'Error:', error.message);
+        console.error('Error validating token mint:', tokenMint, 'Error:', error.message, 'Stack:', error.stack);
         continue;
       }
 
@@ -82,7 +88,8 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
         type: 'CREATE',
         tokenMint,
         programId: pumpFunProgram.toString(),
-        accounts: txDetails.transaction.message.accountKeys.map(key => key.pubkey.toString())
+        accounts: txDetails.transaction.message.accountKeys.map(key => key.pubkey.toString()),
+        signature: tx.signature
       };
 
       const { extractTokenInfo } = require('./Helper.function');
@@ -98,14 +105,14 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
       }
 
       if (checkAgainstFilters(tokenData, filters)) {
-        console.log('Token passed filters in checkNewTokens:', tokenData);
+        console.log('Token passed filters in checkNewTokens:', JSON.stringify(tokenData, null, 2));
         const { formatTokenMessage } = require('./Helper.function');
         const message = formatTokenMessage(tokenData);
         await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' }).catch(err => {
           console.error('Failed to send Telegram alert from checkNewTokens:', err.message, 'Message:', message);
         });
       } else {
-        console.log('Token did not pass filters in checkNewTokens:', tokenMint, 'Token data:', tokenData);
+        console.log('Token did not pass filters in checkNewTokens:', tokenMint, 'Token data:', JSON.stringify(tokenData, null, 2));
         bot.sendMessage(chatId, `ℹ️ Token ${tokenMint} did not pass filters`).catch(err => {
           console.error('Failed to send Telegram message for filter fail:', err.message);
         });
