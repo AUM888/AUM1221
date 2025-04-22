@@ -16,6 +16,8 @@ const extractTokenInfo = async (event) => {
                       event.accountData?.flatMap(acc => acc.tokenBalanceChanges?.map(change => change.mint))
                         .filter(mint => mint && [44, 45].includes(mint.length))[0];
 
+    console.log('Extracted token address:', tokenAddress);
+
     if (!tokenAddress || tokenAddress.length < 44 || tokenAddress.length > 45) {
       console.log('Invalid token address, returning null:', tokenAddress);
       return null;
@@ -27,6 +29,7 @@ const extractTokenInfo = async (event) => {
     let accountInfo;
     try {
       accountInfo = await connection.getParsedAccountInfo(new PublicKey(tokenAddress));
+      console.log('Account info for token:', tokenAddress, JSON.stringify(accountInfo, null, 2));
       if (!accountInfo.value || accountInfo.value.owner.toString() !== TOKEN_PROGRAM.toString()) {
         console.log('Address is not a TOKEN mint account, returning null:', tokenAddress);
         return null;
@@ -52,7 +55,7 @@ const extractTokenInfo = async (event) => {
       tokenData.mintAuthRevoked = !mint.value.data.parsed.info.mintAuthority;
       tokenData.freezeAuthRevoked = !mint.value.data.parsed.info.freezeAuthority;
     } catch (error) {
-      console.error('Error fetching mint data:', error.message);
+      console.error('Error fetching mint data:', error.message, 'Stack:', error.stack);
       tokenData.name = 'Unknown';
       tokenData.mintAuthRevoked = false;
       tokenData.freezeAuthRevoked = false;
@@ -75,7 +78,7 @@ const extractTokenInfo = async (event) => {
         tokenData.price = 0;
       }
     } catch (error) {
-      console.error('Error fetching DexScreener data:', error.message);
+      console.error('Error fetching DexScreener data:', error.message, 'Stack:', error.stack);
       tokenData.marketCap = 0;
       tokenData.liquidity = 0;
       tokenData.price = 0;
@@ -91,12 +94,12 @@ const extractTokenInfo = async (event) => {
       tokenData.devHolding = devHolding;
       tokenData.poolSupply = totalSupply > 0 ? (totalSupply - devHolding) / totalSupply * 100 : 0;
     } catch (error) {
-      console.error('Error fetching token supply or accounts:', error.message);
+      console.error('Error fetching token supply or accounts:', error.message, 'Stack:', error.stack);
       tokenData.devHolding = 0;
       tokenData.poolSupply = 0;
     }
 
-    console.log('Final token data:', tokenData);
+    console.log('Final token data:', JSON.stringify(tokenData, null, 2));
     return tokenData;
   } catch (error) {
     console.error('extractTokenInfo error:', error.message, 'Stack:', error.stack);
@@ -106,7 +109,7 @@ const extractTokenInfo = async (event) => {
 
 const checkAgainstFilters = (tokenData, filters) => {
   try {
-    console.log('Checking token data against filters:', tokenData, 'Filters:', filters);
+    console.log('Checking token data against filters:', JSON.stringify(tokenData, null, 2), 'Filters:', JSON.stringify(filters, null, 2));
     if (!tokenData) {
       console.log('No token data, failing filters');
       return false;
@@ -137,14 +140,14 @@ const checkAgainstFilters = (tokenData, filters) => {
     console.log('Token passed all filters');
     return true;
   } catch (error) {
-    console.error('checkAgainstFilters error:', error.message);
+    console.error('checkAgainstFilters error:', error.message, 'Stack:', error.stack);
     return false;
   }
 };
 
 const formatTokenMessage = (tokenData) => {
   try {
-    console.log('Formatting token message for:', tokenData);
+    console.log('Formatting token message for:', JSON.stringify(tokenData, null, 2));
     if (!tokenData || !tokenData.address) {
       console.log('Invalid token data, returning error message');
       return 'Error formatting token message: Invalid token data';
@@ -164,7 +167,7 @@ const formatTokenMessage = (tokenData) => {
     console.log('Formatted message:', message);
     return message;
   } catch (error) {
-    console.error('formatTokenMessage error:', error.message);
+    console.error('formatTokenMessage error:', error.message, 'Stack:', error.stack);
     return 'Error formatting token message';
   }
 };
