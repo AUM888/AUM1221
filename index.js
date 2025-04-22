@@ -57,9 +57,9 @@ bot.setWebHook(`${webhookBaseUrl}/bot${token}`).then(info => {
 });
 
 let filters = {
-  liquidity: { min: 0, max: 25000 }, // Temporary: Set min to 0 to allow tokens with no DexScreener/Pump.fun data
-  poolSupply: { min: 60, max: 95 },
-  devHolding: { min: 2, max: 10 },
+  liquidity: { min: 0, max: 25000 }, // Allow tokens with no data
+  poolSupply: { min: 0, max: 95 }, // Relaxed min to 0
+  devHolding: { min: 2, max: 100 }, // Relaxed max to 100
   launchPrice: { min: 0.0000000022, max: 0.0000000058 },
   mintAuthRevoked: false,
   freezeAuthRevoked: false
