@@ -1,7 +1,10 @@
 const axios = require('axios');
 const { Connection, PublicKey } = require('@solana/web3.js');
 
-const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, { commitment: 'confirmed' });
+const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, {
+  commitment: 'confirmed',
+  maxSupportedTransactionVersion: 0 // Added to support version 0 transactions
+});
 
 const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainstFilters) => {
   try {
@@ -12,7 +15,20 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
 
     for (const tx of transactions) {
       console.log('Processing transaction:', tx.signature);
-      const txDetails = await connection.getParsedTransaction(tx.signature, { commitment: 'confirmed' });
+      let txDetails;
+      try {
+        txDetails = await connection.getParsedTransaction(tx.signature, { 
+          commitment: 'confirmed',
+          maxSupportedTransactionVersion: 0 // Explicitly set for this call
+        });
+      } catch (error) {
+        if (error.message.includes('Transaction version')) {
+          console.log('Skipping transaction due to unsupported version:', tx.signature);
+          continue;
+        }
+        throw error;
+      }
+
       console.log('Transaction details:', JSON.stringify(txDetails, null, 2));
 
       if (!txDetails || txDetails.meta?.err) {
