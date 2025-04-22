@@ -57,9 +57,9 @@ bot.setWebHook(`${webhookBaseUrl}/bot${token}`).then(info => {
 });
 
 let filters = {
-  liquidity: { min: 0, max: 25000 }, // Allow tokens with no data
-  poolSupply: { min: 0, max: 95 }, // Relaxed min to 0
-  devHolding: { min: 2, max: 100 }, // Relaxed max to 100
+  liquidity: { min: 4000, max: 25000 },
+  poolSupply: { min: 60, max: 95 },
+  devHolding: { min: 2, max: 10 },
   launchPrice: { min: 0.0000000022, max: 0.0000000058 },
   mintAuthRevoked: false,
   freezeAuthRevoked: false
@@ -137,13 +137,14 @@ app.post('/webhook', async (req, res) => {
             maxSupportedTransactionVersion: 0
           });
           console.log('Transaction details for webhook:', JSON.stringify(txDetails, null, 2));
-          const createInstruction = txDetails?.meta?.innerInstructions?.flatMap(inner => inner.instructions)
-            .find(inst => inst.parsed?.info?.newAccount && inst.parsed?.info?.owner === TOKEN_PROGRAM.toString());
-          if (createInstruction) {
-            tokenAddress = createInstruction.parsed.info.newAccount;
+          const createInstruction = txDetails?.transaction.message.instructions.find(
+            inst => inst.programId.toString() === PUMP_FUN_PROGRAM.toString()
+          );
+          if (createInstruction && createInstruction.accounts && createInstruction.accounts.length > 0) {
+            tokenAddress = createInstruction.accounts[0].toString();
           }
         } catch (error) {
-          console.error('Error fetching transaction details for webhook:', event.signature, error.message, 'Stack:', error.stack);
+          console.error('Error fetching transaction details for webhook:', event.signature, error.message);
         }
       }
 
@@ -163,7 +164,7 @@ app.post('/webhook', async (req, res) => {
           continue;
         }
       } catch (error) {
-        console.error('Error validating token address:', tokenAddress, 'Error:', error.message, 'Stack:', error.stack);
+        console.error('Error validating token address:', tokenAddress, 'Error:', error.message);
         continue;
       }
 
@@ -175,7 +176,7 @@ app.post('/webhook', async (req, res) => {
           continue;
         }
       } catch (error) {
-        console.error('Error checking mint supply for token:', tokenAddress, 'Error:', error.message, 'Stack:', error.stack);
+        console.error('Error checking mint supply for token:', tokenAddress, 'Error:', error.message);
         continue;
       }
 
@@ -199,7 +200,7 @@ app.post('/webhook', async (req, res) => {
 
       const bypassFilters = process.env.BYPASS_FILTERS === 'true';
       if (bypassFilters || checkAgainstFilters(tokenData, filters)) {
-        console.log('Token passed filters, sending alert:', JSON.stringify(tokenData, null, 2));
+        console.log('Token passed filters, sending alert:', tokenData);
         const message = formatTokenMessage(tokenData);
         await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' }).catch(err => {
           console.error('Failed to send Telegram alert:', err.message, 'Message:', message);
@@ -208,7 +209,7 @@ app.post('/webhook', async (req, res) => {
           await autoSnipeToken(tokenData.address);
         }
       } else {
-        console.log('Token did not pass filters:', tokenAddress, 'Token data:', JSON.stringify(tokenData, null, 2));
+        console.log('Token did not pass filters:', tokenAddress, 'Token data:', tokenData);
         bot.sendMessage(chatId, `ℹ️ Token ${tokenAddress} did not pass filters`).catch(err => {
           console.error('Failed to send Telegram message for filter fail:', err.message);
         });
@@ -257,7 +258,7 @@ app.post('/test-webhook', async (req, res) => {
       await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' }).catch(err => {
         console.error('Failed to send Telegram test alert:', err.message);
       });
-      console.log('Test alert sent:', JSON.stringify(tokenData, null, 2));
+      console.log('Test alert sent:', tokenData);
       bot.sendMessage(chatId, '✅ Test webhook successful!').catch(err => {
         console.error('Failed to send Telegram test success message:', err.message);
       });
