@@ -1,6 +1,6 @@
 const axios = require('axios');
 const { Connection, PublicKey } = require('@solana/web3.js');
-const cheerio = require('cheerio'); // Added for web scraping
+const cheerio = require('cheerio');
 
 const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, {
   commitment: 'confirmed',
@@ -63,13 +63,16 @@ const extractTokenInfo = async (event) => {
     let dexResponse;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        dexResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`);
+        dexResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`, {
+          timeout: 10000,
+          headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
         console.log('DexScreener response (attempt', attempt, '):', JSON.stringify(dexResponse.data, null, 2));
         if (dexResponse.data.pairs) {
           break;
         }
         console.log('No pairs found on attempt', attempt, 'for:', tokenAddress, 'Retrying after delay...');
-        await new Promise(resolve => setTimeout(resolve, 5000)); // 5s delay
+        await new Promise(resolve => setTimeout(resolve, 5000));
       } catch (error) {
         console.error('Error fetching DexScreener data (attempt', attempt, '):', error.message, 'Stack:', error.stack);
         if (attempt === 3) {
@@ -77,7 +80,7 @@ const extractTokenInfo = async (event) => {
           dexResponse = { data: { pairs: null } };
         } else {
           console.log('Retrying DexScreener after delay...');
-          await new Promise(resolve => setTimeout(resolve, 5000)); // 5s delay
+          await new Promise(resolve => setTimeout(resolve, 5000));
         }
       }
     }
@@ -87,8 +90,8 @@ const extractTokenInfo = async (event) => {
     if (!dexResponse.data.pairs) {
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          // Try Pump.fun API
           pumpResponse = await axios.get(`https://api-v2.pump.fun/tokens/${tokenAddress}`, {
+            timeout: 10000,
             headers: { 'User-Agent': 'Mozilla/5.0' }
           });
           console.log('Pump.fun API response (attempt', attempt, '):', JSON.stringify(pumpResponse.data, null, 2));
@@ -96,14 +99,14 @@ const extractTokenInfo = async (event) => {
             break;
           }
           console.log('No data from Pump.fun API on attempt', attempt, 'for:', tokenAddress, 'Retrying after delay...');
-          await new Promise(resolve => setTimeout(resolve, 5000)); // 5s delay
+          await new Promise(resolve => setTimeout(resolve, 5000));
         } catch (error) {
           console.error('Error fetching Pump.fun API data (attempt', attempt, '):', error.message, 'Stack:', error.stack);
           if (attempt === 3) {
             console.log('Max retries reached for Pump.fun API, trying web scraping:', tokenAddress);
-            // Fallback to Pump.fun web scraping
             try {
               const webResponse = await axios.get(`https://pump.fun/${tokenAddress}`, {
+                timeout: 10000,
                 headers: { 'User-Agent': 'Mozilla/5.0' }
               });
               const $ = cheerio.load(webResponse.data);
@@ -114,8 +117,7 @@ const extractTokenInfo = async (event) => {
                 data: {
                   name,
                   market_cap: marketCap,
-                  // Approximate liquidity as 10% of market cap
-                  liquidity: marketCap ? marketCap * 0.1 : 1000 // Default to $1000 if no market cap
+                  liquidity: marketCap ? marketCap * 0.1 : 1000
                 }
               };
               console.log('Pump.fun web scrape successful:', JSON.stringify(pumpResponse.data, null, 2));
@@ -125,7 +127,7 @@ const extractTokenInfo = async (event) => {
             }
           } else {
             console.log('Retrying Pump.fun API after delay...');
-            await new Promise(resolve => setTimeout(resolve, 5000)); // 5s delay
+            await new Promise(resolve => setTimeout(resolve, 5000));
           }
         }
       }
@@ -141,18 +143,18 @@ const extractTokenInfo = async (event) => {
       } else if (pumpResponse.data) {
         tokenData.name = pumpResponse.data.name || tokenData.name;
         tokenData.marketCap = pumpResponse.data.market_cap || 0;
-        tokenData.liquidity = pumpResponse.data.liquidity || (tokenData.marketCap ? tokenData.marketCap * 0.1 : 1000); // Default to $1000
+        tokenData.liquidity = pumpResponse.data.liquidity || (tokenData.marketCap ? tokenData.marketCap * 0.1 : 1000);
         tokenData.price = pumpResponse.data.price || 0;
       } else {
         console.log('No DexScreener or Pump.fun data for:', tokenAddress);
         tokenData.marketCap = 0;
-        tokenData.liquidity = 1000; // Default to $1000 to pass filters
+        tokenData.liquidity = 1000;
         tokenData.price = 0;
       }
     } catch (error) {
       console.error('Error processing market data:', error.message, 'Stack:', error.stack);
       tokenData.marketCap = 0;
-      tokenData.liquidity = 1000; // Default to $1000 to pass filters
+      tokenData.liquidity = 1000;
       tokenData.price = 0;
     }
 
@@ -162,9 +164,9 @@ const extractTokenInfo = async (event) => {
       const totalSupply = (await connection.getTokenSupply(new PublicKey(tokenAddress))).value.uiAmount;
       console.log('Largest accounts:', JSON.stringify(largestAccounts, null, 2));
       console.log('Total supply:', totalSupply);
-      const devHolding = largestAccounts.value[0]?.uiAmount / totalSupply * 100 || 0;
+      const devHolding = largestAccounts.value[0]?.uiAmount && totalSupply > 0 ? (largestAccounts.value[0].uiAmount / totalSupply * 100) : 0;
       tokenData.devHolding = devHolding;
-      tokenData.poolSupply = totalSupply > 0 ? (totalSupply - devHolding) / totalSupply * 100 : 0;
+      tokenData.poolSupply = totalSupply > 0 ? (totalSupply - (largestAccounts.value[0]?.uiAmount || 0)) / totalSupply * 100 : 0;
     } catch (error) {
       console.error('Error fetching token supply or accounts:', error.message, 'Stack:', error.stack);
       tokenData.devHolding = 0;
