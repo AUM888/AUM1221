@@ -4,6 +4,9 @@ const TelegramBot = require('node-telegram-bot-api');
 const { Connection, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction, Keypair } = require('@solana/web3.js');
 const { getMint, TOKEN_PROGRAM_ID } = require('@solana/spl-token');
 
+// Import checkNewTokens from Alert.function.js
+const { checkNewTokens } = require('./Alert.function');
+
 // Function to dynamically load Helper.function.js
 const loadHelperModule = () => {
   try {
