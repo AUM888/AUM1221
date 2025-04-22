@@ -72,6 +72,15 @@ let lastReset = Date.now();
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+app.get('/webhook-status', (req, res) => {
+  res.status(200).json({
+    status: 'active',
+    webhookUrl: `${webhookBaseUrl}/webhook`,
+    lastEvent: lastTokenData ? new Date(lastTokenData.timestamp).toISOString() : 'No events received',
+    eventCounter: eventCounter
+  });
+});
+
 app.post('/webhook', async (req, res) => {
   try {
     const { extractTokenInfo, checkAgainstFilters, formatTokenMessage } = loadHelperModule();
@@ -120,13 +129,23 @@ app.post('/webhook', async (req, res) => {
         continue;
       }
 
-      let tokenAddress;
-      if (event.tokenMint) {
-        tokenAddress = event.tokenMint;
-      } else if (event.accountData) {
-        const mints = event.accountData?.flatMap(acc => acc.tokenBalanceChanges?.map(change => change.mint))
-          .filter(mint => mint && [44, 45].includes(mint.length));
-        tokenAddress = mints?.[0];
+      let tokenAddress = event.tokenMint;
+      if (!tokenAddress && event.signature) {
+        try {
+          const txDetails = await connection.getParsedTransaction(event.signature, {
+            commitment: 'confirmed',
+            maxSupportedTransactionVersion: 0
+          });
+          console.log('Transaction details for webhook:', JSON.stringify(txDetails, null, 2));
+          const createInstruction = txDetails?.transaction.message.instructions.find(
+            inst => inst.programId.toString() === PUMP_FUN_PROGRAM.toString()
+          );
+          if (createInstruction && createInstruction.accounts && createInstruction.accounts.length > 0) {
+            tokenAddress = createInstruction.accounts[0].toString();
+          }
+        } catch (error) {
+          console.error('Error fetching transaction details for webhook:', event.signature, error.message);
+        }
       }
 
       console.log('Token address extracted:', tokenAddress);
@@ -161,8 +180,8 @@ app.post('/webhook', async (req, res) => {
         continue;
       }
 
-      const tokenData = await extractTokenInfo(event);
-      console.log('Token data fetched:', tokenData);
+      const tokenData = await extractTokenInfo({ ...event, tokenMint: tokenAddress });
+      console.log('Token data fetched:', JSON.stringify(tokenData, null, 2));
 
       if (!tokenData) {
         console.log('No valid token data for:', tokenAddress);
@@ -176,6 +195,7 @@ app.post('/webhook', async (req, res) => {
         continue;
       }
 
+      tokenData.timestamp = now;
       lastTokenData = tokenData;
 
       const bypassFilters = process.env.BYPASS_FILTERS === 'true';
@@ -231,7 +251,7 @@ app.post('/test-webhook', async (req, res) => {
     });
 
     const tokenData = await extractTokenInfo(mockEvent);
-    console.log('Test token data:', tokenData);
+    console.log('Test token data:', JSON.stringify(tokenData, null, 2));
 
     if (tokenData) {
       const message = formatTokenMessage(tokenData);
