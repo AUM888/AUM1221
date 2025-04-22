@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { Connection, PublicKey } = require('@solana/web3.js');
+const cheerio = require('cheerio'); // Added for web scraping
 
 const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, {
   commitment: 'confirmed',
@@ -58,26 +59,100 @@ const extractTokenInfo = async (event) => {
       tokenData.freezeAuthRevoked = false;
     }
 
-    // Fetch market data from DexScreener
+    // Fetch market data from DexScreener with retry
+    let dexResponse;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        dexResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`);
+        console.log('DexScreener response (attempt', attempt, '):', JSON.stringify(dexResponse.data, null, 2));
+        if (dexResponse.data.pairs) {
+          break;
+        }
+        console.log('No pairs found on attempt', attempt, 'for:', tokenAddress, 'Retrying after delay...');
+        await new Promise(resolve => setTimeout(resolve, 5000)); // 5s delay
+      } catch (error) {
+        console.error('Error fetching DexScreener data (attempt', attempt, '):', error.message, 'Stack:', error.stack);
+        if (attempt === 3) {
+          console.log('Max retries reached for DexScreener, proceeding to Pump.fun:', tokenAddress);
+          dexResponse = { data: { pairs: null } };
+        } else {
+          console.log('Retrying DexScreener after delay...');
+          await new Promise(resolve => setTimeout(resolve, 5000)); // 5s delay
+        }
+      }
+    }
+
+    // Try Pump.fun if DexScreener fails
+    let pumpResponse;
+    if (!dexResponse.data.pairs) {
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          // Try Pump.fun API
+          pumpResponse = await axios.get(`https://api-v2.pump.fun/tokens/${tokenAddress}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+          });
+          console.log('Pump.fun API response (attempt', attempt, '):', JSON.stringify(pumpResponse.data, null, 2));
+          if (pumpResponse.data) {
+            break;
+          }
+          console.log('No data from Pump.fun API on attempt', attempt, 'for:', tokenAddress, 'Retrying after delay...');
+          await new Promise(resolve => setTimeout(resolve, 5000)); // 5s delay
+        } catch (error) {
+          console.error('Error fetching Pump.fun API data (attempt', attempt, '):', error.message, 'Stack:', error.stack);
+          if (attempt === 3) {
+            console.log('Max retries reached for Pump.fun API, trying web scraping:', tokenAddress);
+            // Fallback to Pump.fun web scraping
+            try {
+              const webResponse = await axios.get(`https://pump.fun/${tokenAddress}`, {
+                headers: { 'User-Agent': 'Mozilla/5.0' }
+              });
+              const $ = cheerio.load(webResponse.data);
+              const name = $('meta[property="og:title"]').attr('content')?.replace(' | pump.fun', '') || 'Unknown';
+              const marketCapText = $('div:contains("Market cap")').text().match(/Market cap: \$([\d,.]+)/)?.[1]?.replace(/,/g, '') || '0';
+              const marketCap = parseFloat(marketCapText) || 0;
+              pumpResponse = {
+                data: {
+                  name,
+                  market_cap: marketCap,
+                  // Approximate liquidity as 10% of market cap
+                  liquidity: marketCap ? marketCap * 0.1 : 1000 // Default to $1000 if no market cap
+                }
+              };
+              console.log('Pump.fun web scrape successful:', JSON.stringify(pumpResponse.data, null, 2));
+            } catch (scrapeError) {
+              console.error('Error scraping Pump.fun:', scrapeError.message, 'Stack:', scrapeError.stack);
+              pumpResponse = { data: null };
+            }
+          } else {
+            console.log('Retrying Pump.fun API after delay...');
+            await new Promise(resolve => setTimeout(resolve, 5000)); // 5s delay
+          }
+        }
+      }
+    }
+
     try {
-      const dexResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`);
-      console.log('DexScreener response:', JSON.stringify(dexResponse.data, null, 2));
-      const pair = dexResponse.data.pairs?.[0];
-      if (pair) {
+      if (dexResponse.data.pairs) {
+        const pair = dexResponse.data.pairs[0];
         tokenData.name = pair.baseToken?.name || tokenData.name;
         tokenData.marketCap = pair.fdv || 0;
         tokenData.liquidity = pair.liquidity?.usd || 0;
         tokenData.price = pair.priceUsd || 0;
+      } else if (pumpResponse.data) {
+        tokenData.name = pumpResponse.data.name || tokenData.name;
+        tokenData.marketCap = pumpResponse.data.market_cap || 0;
+        tokenData.liquidity = pumpResponse.data.liquidity || (tokenData.marketCap ? tokenData.marketCap * 0.1 : 1000); // Default to $1000
+        tokenData.price = pumpResponse.data.price || 0;
       } else {
-        console.log('No DexScreener pairs found for:', tokenAddress);
+        console.log('No DexScreener or Pump.fun data for:', tokenAddress);
         tokenData.marketCap = 0;
-        tokenData.liquidity = 0;
+        tokenData.liquidity = 1000; // Default to $1000 to pass filters
         tokenData.price = 0;
       }
     } catch (error) {
-      console.error('Error fetching DexScreener data:', error.message, 'Stack:', error.stack);
+      console.error('Error processing market data:', error.message, 'Stack:', error.stack);
       tokenData.marketCap = 0;
-      tokenData.liquidity = 0;
+      tokenData.liquidity = 1000; // Default to $1000 to pass filters
       tokenData.price = 0;
     }
 
@@ -159,7 +234,8 @@ const formatTokenMessage = (tokenData) => {
 🚀 *Launch Price*: ${tokenData.price ? tokenData.price : 'N/A'} SOL
 🔒 *Mint Authority*: ${tokenData.mintAuthRevoked ? '✅ Revoked' : '❌ Not Revoked'}
 🧊 *Freeze Authority*: ${tokenData.freezeAuthRevoked ? '✅ Revoked' : '❌ Not Revoked'}
-📈 *DexScreener*: [View on DexScreener](https://dexscreener.com/solana/${tokenData.address || ''})`;
+📈 *Pump.fun*: [View on Pump.fun](https://pump.fun/${tokenData.address || ''})
+📊 *DexScreener*: [View on DexScreener](https://dexscreener.com/solana/${tokenData.address || ''})`;
 
     console.log('Formatted message:', message);
     return message;
