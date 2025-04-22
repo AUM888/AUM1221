@@ -1,7 +1,10 @@
 const axios = require('axios');
 const { Connection, PublicKey } = require('@solana/web3.js');
 
-const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, { commitment: 'confirmed' });
+const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, {
+  commitment: 'confirmed',
+  maxSupportedTransactionVersion: 0 // Added to support version 0 transactions
+});
 
 const extractTokenInfo = async (event) => {
   try {
@@ -64,7 +67,7 @@ const extractTokenInfo = async (event) => {
       const totalSupply = (await connection.getTokenSupply(new PublicKey(tokenAddress))).value.uiAmount;
       const devHolding = largestAccounts.value[0]?.uiAmount / totalSupply * 100 || 0;
       tokenData.devHolding = devHolding;
-      tokenData.poolSupply = totalSupply ? (totalSupply - devHolding) / totalSupply * 100 : 0;
+      tokenData.poolSupply = totalSupply > 0 ? (totalSupply - devHolding) / totalSupply * 100 : 0;
     } catch (error) {
       console.error('Error fetching token supply or accounts:', error.message);
       tokenData.devHolding = 0;
