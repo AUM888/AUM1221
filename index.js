@@ -32,7 +32,7 @@ const chatId = process.env.TELEGRAM_CHAT_ID || '-1002511600127';
 const webhookBaseUrl = process.env.WEBHOOK_URL?.replace(/\/$/, '');
 const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, {
   commitment: 'confirmed',
-  maxSupportedTransactionVersion: 0 // Added to support version 0 transactions
+  maxSupportedTransactionVersion: 0
 });
 
 // Validate environment variables
@@ -42,6 +42,7 @@ if (!token || !webhookBaseUrl || !process.env.HELIUS_API_KEY || !process.env.PRI
 }
 
 const PUMP_FUN_PROGRAM = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
+const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 console.log('PUMP_FUN_PROGRAM defined:', PUMP_FUN_PROGRAM.toString());
 
 const bot = new TelegramBot(token, { polling: false, request: { retryAfter: 21 } });
@@ -121,13 +122,24 @@ app.post('/webhook', async (req, res) => {
 
       let tokenAddress = event.tokenMint ||
                         event.accountData?.flatMap(acc => acc.tokenBalanceChanges?.map(change => change.mint))
-                          .filter(mint => mint && [44, 45].includes(mint.length))[0] ||
-                        event.accounts?.find(acc => acc && acc.length >= 44 && acc.length <= 45);
+                          .filter(mint => mint && [44, 45].includes(mint.length))[0];
 
       console.log('Token address extracted:', tokenAddress);
 
       if (!tokenAddress || tokenAddress.length < 44 || tokenAddress.length > 45) {
         console.log('Invalid token address, skipping:', tokenAddress);
+        continue;
+      }
+
+      // Validate token address is a mint account
+      try {
+        const accountInfo = await connection.getParsedAccountInfo(new PublicKey(tokenAddress));
+        if (!accountInfo.value || accountInfo.value.owner.toString() !== TOKEN_PROGRAM.toString()) {
+          console.log('Address is not a TOKEN mint account, skipping:', tokenAddress);
+          continue;
+        }
+      } catch (error) {
+        console.error('Error validating token address:', tokenAddress, 'Error:', error.message);
         continue;
       }
 
