@@ -12,10 +12,7 @@ const extractTokenInfo = async (event) => {
   try {
     console.log('extractTokenInfo called with event:', JSON.stringify(event, null, 2));
 
-    let tokenAddress = event.tokenMint ||
-                      event.accountData?.flatMap(acc => acc.tokenBalanceChanges?.map(change => change.mint))
-                        .filter(mint => mint && [44, 45].includes(mint.length))[0];
-
+    const tokenAddress = event.tokenMint;
     console.log('Extracted token address:', tokenAddress);
 
     if (!tokenAddress || tokenAddress.length < 44 || tokenAddress.length > 45) {
@@ -35,7 +32,7 @@ const extractTokenInfo = async (event) => {
         return null;
       }
     } catch (error) {
-      console.error('Error validating token address:', tokenAddress, 'Error:', error.message);
+      console.error('Error validating token address:', tokenAddress, 'Error:', error.message, 'Stack:', error.stack);
       return null;
     }
 
