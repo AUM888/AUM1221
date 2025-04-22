@@ -3,20 +3,36 @@ const { Connection, PublicKey } = require('@solana/web3.js');
 
 const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, {
   commitment: 'confirmed',
-  maxSupportedTransactionVersion: 0 // Added to support version 0 transactions
+  maxSupportedTransactionVersion: 0
 });
+
+const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 
 const extractTokenInfo = async (event) => {
   try {
     console.log('extractTokenInfo called with event:', JSON.stringify(event, null, 2));
 
     let tokenAddress = event.tokenMint ||
-                      event.accounts?.find(acc => acc && acc.length >= 44 && acc.length <= 45) ||
                       event.accountData?.flatMap(acc => acc.tokenBalanceChanges?.map(change => change.mint))
                         .filter(mint => mint && [44, 45].includes(mint.length))[0];
 
-    if (!tokenAddress) {
-      console.log('No token address found in event');
+    if (!tokenAddress || tokenAddress.length < 44 || tokenAddress.length > 45) {
+      console.log('Invalid token address, returning null:', tokenAddress);
+      return null;
+    }
+
+    console.log('Validating token address:', tokenAddress);
+
+    // Validate token address is a mint account
+    let accountInfo;
+    try {
+      accountInfo = await connection.getParsedAccountInfo(new PublicKey(tokenAddress));
+      if (!accountInfo.value || accountInfo.value.owner.toString() !== TOKEN_PROGRAM.toString()) {
+        console.log('Address is not a TOKEN mint account, returning null:', tokenAddress);
+        return null;
+      }
+    } catch (error) {
+      console.error('Error validating token address:', tokenAddress, 'Error:', error.message);
       return null;
     }
 
@@ -27,8 +43,8 @@ const extractTokenInfo = async (event) => {
     try {
       const mint = await connection.getParsedAccountInfo(new PublicKey(tokenAddress));
       console.log('Mint data fetched:', JSON.stringify(mint, null, 2));
-      if (!mint.value) {
-        console.log('No mint data found for:', tokenAddress);
+      if (!mint.value || !mint.value.data.parsed) {
+        console.log('No valid mint data found for:', tokenAddress);
         return null;
       }
       tokenData.name = mint.value.data.parsed.info?.name || 'Unknown';
@@ -52,6 +68,11 @@ const extractTokenInfo = async (event) => {
         tokenData.marketCap = pair.fdv || 0;
         tokenData.liquidity = pair.liquidity?.usd || 0;
         tokenData.price = pair.priceUsd || 0;
+      } else {
+        console.log('No DexScreener pairs found for:', tokenAddress);
+        tokenData.marketCap = 0;
+        tokenData.liquidity = 0;
+        tokenData.price = 0;
       }
     } catch (error) {
       console.error('Error fetching DexScreener data:', error.message);
@@ -63,8 +84,9 @@ const extractTokenInfo = async (event) => {
     // Fetch dev holding and pool supply
     try {
       const largestAccounts = await connection.getTokenLargestAccounts(new PublicKey(tokenAddress));
-      console.log('Largest accounts:', JSON.stringify(largestAccounts, null, 2));
       const totalSupply = (await connection.getTokenSupply(new PublicKey(tokenAddress))).value.uiAmount;
+      console.log('Largest accounts:', JSON.stringify(largestAccounts, null, 2));
+      console.log('Total supply:', totalSupply);
       const devHolding = largestAccounts.value[0]?.uiAmount / totalSupply * 100 || 0;
       tokenData.devHolding = devHolding;
       tokenData.poolSupply = totalSupply > 0 ? (totalSupply - devHolding) / totalSupply * 100 : 0;
@@ -85,6 +107,10 @@ const extractTokenInfo = async (event) => {
 const checkAgainstFilters = (tokenData, filters) => {
   try {
     console.log('Checking token data against filters:', tokenData, 'Filters:', filters);
+    if (!tokenData) {
+      console.log('No token data, failing filters');
+      return false;
+    }
     const checks = [
       { field: 'liquidity', value: tokenData.liquidity || 0, min: filters.liquidity.min, max: filters.liquidity.max },
       { field: 'poolSupply', value: tokenData.poolSupply || 0, min: filters.poolSupply.min, max: filters.poolSupply.max },
@@ -119,6 +145,10 @@ const checkAgainstFilters = (tokenData, filters) => {
 const formatTokenMessage = (tokenData) => {
   try {
     console.log('Formatting token message for:', tokenData);
+    if (!tokenData || !tokenData.address) {
+      console.log('Invalid token data, returning error message');
+      return 'Error formatting token message: Invalid token data';
+    }
     const message = `🌟 *New Token Alert* 🌟
 📛 *Token Name*: ${tokenData.name || 'Unknown'}
 📍 *Token Address*: \`${tokenData.address || 'N/A'}\`
