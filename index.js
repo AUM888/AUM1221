@@ -200,10 +200,10 @@ app.post('/webhook', async (req, res) => {
       tokenData.timestamp = now;
       lastTokenData = tokenData;
 
-      const bypassFilters = process.env.BYPASS_FILTERS === 'true'; // FIXED: Removed || true
-      console.log('Bypass Filters:', bypassFilters); // ADDED LOG
-      console.log('Token Data Before Filter Check:', JSON.stringify(tokenData, null, 2)); // ADDED LOG
-      console.log('Filter Check Result:', checkAgainstFilters(tokenData, filters)); // ADDED LOG
+      const bypassFilters = process.env.BYPASS_FILTERS === 'true';
+      console.log('Bypass Filters:', bypassFilters);
+      console.log('Token Data Before Filter Check:', JSON.stringify(tokenData, null, 2));
+      console.log('Filter Check Result:', checkAgainstFilters(tokenData, filters));
 
       if (bypassFilters || checkAgainstFilters(tokenData, filters)) {
         console.log('Token passed filters, sending alert:', tokenData);
@@ -217,7 +217,14 @@ app.post('/webhook', async (req, res) => {
         }
       } else {
         console.log('Token did not pass filters:', tokenAddress, 'Token data:', tokenData);
-        bot.sendMessage(chatId, `ℹ️ Token ${tokenAddress} did not pass filters`).catch(err => {
+        let failMessage = `ℹ️ Token ${tokenAddress} did not pass filters\nDetails:\n`;
+        failMessage += `Liquidity: ${tokenData.liquidity || 0} (Required: ${filters.liquidity.min}-${filters.liquidity.max})\n`;
+        failMessage += `Pool Supply: ${tokenData.poolSupply || 0}% (Required: ${filters.poolSupply.min}-${filters.poolSupply.max})\n`;
+        failMessage += `Dev Holding: ${tokenData.devHolding || 0}% (Required: ${filters.devHolding.min}-${filters.devHolding.max})\n`;
+        failMessage += `Launch Price: ${tokenData.price || 0} SOL (Required: ${filters.launchPrice.min}-${filters.launchPrice.max})\n`;
+        failMessage += `Mint Auth Revoked: ${tokenData.mintAuthRevoked ? 'Yes' : 'No'} (Required: ${filters.mintAuthRevoked ? 'Yes' : 'No'})\n`;
+        failMessage += `Freeze Auth Revoked: ${tokenData.freezeAuthRevoked ? 'Yes' : 'No'} (Required: ${filters.freezeAuthRevoked ? 'Yes' : 'No'})`;
+        bot.sendMessage(chatId, failMessage).catch(err => {
           console.error('Failed to send Telegram message for filter fail:', err.message);
         });
         await delay(2000);
@@ -448,7 +455,7 @@ bot.on('callback_query', (callbackQuery) => {
 
     case 'edit_poolsupply':
       userStates[chatId] = { editing: 'poolsupply' };
-      bot.sendMessage(chatId, '�  Edit Pool Supply\nPlease send the new range (e.g., "60-95" or "60 95")', {
+      bot.sendMessage(chatId, '✏️ Edit Pool Supply\nPlease send the new range (e.g., "60-95" or "60 95")', {
         reply_markup: {
           inline_keyboard: [
             [{ text: '⬅️ Back', callback_data: 'filters' }]
