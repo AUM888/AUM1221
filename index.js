@@ -114,11 +114,13 @@ app.post('/webhook', async (req, res) => {
       return res.status(400).send('No events received');
     }
 
+    console.log('BYPASS_FILTERS value from env:', process.env.BYPASS_FILTERS); // ADDED LOG
+
     for (const event of events) {
       console.log('Processing event, type:', event.type, 'programId:', event.programId);
 
-      if (event.type !== 'CREATE') {
-        console.log('Skipping non-CREATE event:', event.type);
+      if (event.type !== 'TOKEN_MINT') { // CHANGED FROM 'CREATE' TO 'TOKEN_MINT'
+        console.log('Skipping non-TOKEN_MINT event:', event.type);
         continue;
       }
 
@@ -137,11 +139,11 @@ app.post('/webhook', async (req, res) => {
             maxSupportedTransactionVersion: 0
           });
           console.log('Transaction details for webhook:', JSON.stringify(txDetails, null, 2));
-          const createInstruction = txDetails?.transaction.message.instructions.find(
-            inst => inst.programId.toString() === PUMP_FUN_PROGRAM.toString()
+          const mintInstruction = txDetails?.transaction.message.instructions.find(
+            inst => inst.programId.toString() === TOKEN_PROGRAM.toString()
           );
-          if (createInstruction && createInstruction.accounts && createInstruction.accounts.length > 0) {
-            tokenAddress = createInstruction.accounts[0].toString();
+          if (mintInstruction && mintInstruction.accounts && mintInstruction.accounts.length > 0) {
+            tokenAddress = mintInstruction.accounts[0].toString();
           }
         } catch (error) {
           console.error('Error fetching transaction details for webhook:', event.signature, error.message);
@@ -155,7 +157,6 @@ app.post('/webhook', async (req, res) => {
         continue;
       }
 
-      // Validate token address is a mint account
       try {
         const accountInfo = await connection.getParsedAccountInfo(new PublicKey(tokenAddress));
         console.log('Account info for token:', tokenAddress, JSON.stringify(accountInfo, null, 2));
@@ -181,7 +182,7 @@ app.post('/webhook', async (req, res) => {
       }
 
       const tokenData = await extractTokenInfo({ ...event, tokenMint: tokenAddress });
-      console.log('Token data fetched:', JSON.stringify(tokenData, null, 2));
+      console.log('Extracted Token Data:', JSON.stringify(tokenData, null, 2)); // ADDED LOG
 
       if (!tokenData) {
         console.log('No valid token data for:', tokenAddress);
@@ -199,9 +200,13 @@ app.post('/webhook', async (req, res) => {
       lastTokenData = tokenData;
 
       const bypassFilters = process.env.BYPASS_FILTERS === 'true';
+      console.log('Bypass Filters:', bypassFilters); // ADDED LOG
+      console.log('Filter Check Result:', checkAgainstFilters(tokenData, filters)); // ADDED LOG
+
       if (bypassFilters || checkAgainstFilters(tokenData, filters)) {
         console.log('Token passed filters, sending alert:', tokenData);
         const message = formatTokenMessage(tokenData);
+        console.log('Formatted Message to Send:', message); // ADDED LOG
         await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' }).catch(err => {
           console.error('Failed to send Telegram alert:', err.message, 'Message:', message);
         });
@@ -240,7 +245,7 @@ app.post('/test-webhook', async (req, res) => {
     }
 
     const mockEvent = {
-      type: 'CREATE',
+      type: 'TOKEN_MINT', // CHANGED TO 'TOKEN_MINT'
       tokenMint: 'TEST_TOKEN_ADDRESS',
       programId: PUMP_FUN_PROGRAM.toString(),
       accounts: ['TEST_TOKEN_ADDRESS', PUMP_FUN_PROGRAM.toString()]
