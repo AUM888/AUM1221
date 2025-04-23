@@ -83,6 +83,7 @@ app.get('/webhook-status', (req, res) => {
 
 app.post('/webhook', async (req, res) => {
   try {
+    console.log('Webhook endpoint hit'); // ADDED LOG
     const { extractTokenInfo, checkAgainstFilters, formatTokenMessage } = loadHelperModule();
     if (typeof extractTokenInfo !== 'function' || typeof checkAgainstFilters !== 'function' || typeof formatTokenMessage !== 'function') {
       console.error('One or more functions are not defined:', {
@@ -119,7 +120,7 @@ app.post('/webhook', async (req, res) => {
     for (const event of events) {
       console.log('Processing event, type:', event.type, 'programId:', event.programId);
 
-      if (event.type !== 'TOKEN_MINT') { // CHANGED FROM 'CREATE' TO 'TOKEN_MINT'
+      if (event.type !== 'TOKEN_MINT') {
         console.log('Skipping non-TOKEN_MINT event:', event.type);
         continue;
       }
@@ -199,7 +200,7 @@ app.post('/webhook', async (req, res) => {
       tokenData.timestamp = now;
       lastTokenData = tokenData;
 
-      const bypassFilters = process.env.BYPASS_FILTERS === 'true';
+      const bypassFilters = process.env.BYPASS_FILTERS === 'true' || true; // FORCED BYPASS FOR TESTING
       console.log('Bypass Filters:', bypassFilters); // ADDED LOG
       console.log('Filter Check Result:', checkAgainstFilters(tokenData, filters)); // ADDED LOG
 
@@ -245,7 +246,7 @@ app.post('/test-webhook', async (req, res) => {
     }
 
     const mockEvent = {
-      type: 'TOKEN_MINT', // CHANGED TO 'TOKEN_MINT'
+      type: 'TOKEN_MINT',
       tokenMint: 'TEST_TOKEN_ADDRESS',
       programId: PUMP_FUN_PROGRAM.toString(),
       accounts: ['TEST_TOKEN_ADDRESS', PUMP_FUN_PROGRAM.toString()]
