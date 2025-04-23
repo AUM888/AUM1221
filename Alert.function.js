@@ -41,20 +41,20 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
       }
 
       let tokenMint;
-      // Find Pump.fun CREATE instruction
-      const createInstruction = txDetails.transaction.message.instructions.find(
-        inst => inst.programId.toString() === PUMP_FUN_PROGRAM.toString()
+      // Find TOKEN_MINT instruction
+      const mintInstruction = txDetails.transaction.message.instructions.find(
+        inst => inst.programId.toString() === TOKEN_PROGRAM.toString()
       );
 
-      if (createInstruction) {
-        console.log('CREATE instruction found:', JSON.stringify(createInstruction, null, 2));
-        // Pump.fun CREATE instruction typically has mint as the first account
-        if (createInstruction.accounts && createInstruction.accounts.length > 0) {
-          tokenMint = createInstruction.accounts[0].toString();
+      if (mintInstruction) {
+        console.log('TOKEN_MINT instruction found:', JSON.stringify(mintInstruction, null, 2));
+        // Token mint instruction typically has mint as the first account
+        if (mintInstruction.accounts && mintInstruction.accounts.length > 0) {
+          tokenMint = mintInstruction.accounts[0].toString();
         }
       }
 
-      // Fallback to postTokenBalances if no CREATE instruction
+      // Fallback to postTokenBalances if no TOKEN_MINT instruction
       if (!tokenMint && txDetails.meta?.postTokenBalances) {
         const mintBalance = txDetails.meta.postTokenBalances.find(
           balance => balance.mint && [44, 45].includes(balance.mint.length)
@@ -85,14 +85,14 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
       }
 
       const event = {
-        type: 'CREATE',
+        type: 'TOKEN_MINT', // CHANGED TO TOKEN_MINT
         tokenMint,
         programId: pumpFunProgram.toString(),
         accounts: txDetails.transaction.message.accountKeys.map(key => key.pubkey.toString()),
         signature: tx.signature
       };
 
-      const { extractTokenInfo } = require('./Helper.function');
+      const { extractTokenInfo, formatTokenMessage } = require('./Helper.function');
       const tokenData = await extractTokenInfo(event);
       console.log('Token data from checkNewTokens:', JSON.stringify(tokenData, null, 2));
 
@@ -104,9 +104,13 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
         continue;
       }
 
-      if (checkAgainstFilters(tokenData, filters)) {
+      // Apply bypassFilters logic similar to index.js
+      const bypassFilters = process.env.BYPASS_FILTERS === 'true' || true; // FORCED BYPASS FOR TESTING
+      console.log('Bypass Filters in checkNewTokens:', bypassFilters); // ADDED LOG
+      console.log('Filter Check Result in checkNewTokens:', checkAgainstFilters(tokenData, filters)); // ADDED LOG
+
+      if (bypassFilters || checkAgainstFilters(tokenData, filters)) {
         console.log('Token passed filters in checkNewTokens:', JSON.stringify(tokenData, null, 2));
-        const { formatTokenMessage } = require('./Helper.function');
         const message = formatTokenMessage(tokenData);
         await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' }).catch(err => {
           console.error('Failed to send Telegram alert from checkNewTokens:', err.message, 'Message:', message);
