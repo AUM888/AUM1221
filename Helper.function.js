@@ -58,27 +58,36 @@ const extractTokenInfo = async (event) => {
       tokenData.freezeAuthRevoked = false;
     }
 
-    // Fetch market data from DexScreener
-    try {
-      const dexResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`);
-      console.log('DexScreener response:', JSON.stringify(dexResponse.data, null, 2));
-      const pair = dexResponse.data.pairs?.[0];
-      if (pair) {
-        tokenData.name = pair.baseToken?.name || tokenData.name;
-        tokenData.marketCap = pair.fdv || 0;
-        tokenData.liquidity = pair.liquidity?.usd || 0;
-        tokenData.price = pair.priceUsd || 0;
-      } else {
-        console.log('No DexScreener pairs found for:', tokenAddress);
-        tokenData.marketCap = 0;
-        tokenData.liquidity = 0;
-        tokenData.price = 0;
+    // Fetch market data from DexScreener with retry logic
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        const dexResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`, { timeout: 5000 });
+        console.log('DexScreener response:', JSON.stringify(dexResponse.data, null, 2));
+        const pair = dexResponse.data.pairs?.[0];
+        if (pair) {
+          tokenData.name = pair.baseToken?.name || tokenData.name;
+          tokenData.marketCap = pair.fdv || 0;
+          tokenData.liquidity = pair.liquidity?.usd || 0;
+          tokenData.price = pair.priceUsd || 0;
+          break;
+        } else {
+          console.log('No DexScreener pairs found for:', tokenAddress);
+          tokenData.marketCap = 0;
+          tokenData.liquidity = 0;
+          tokenData.price = 0;
+          break;
+        }
+      } catch (error) {
+        console.error('Error fetching DexScreener data, retries left:', retries, 'Error:', error.message, 'Stack:', error.stack);
+        retries--;
+        if (retries === 0) {
+          tokenData.marketCap = 0;
+          tokenData.liquidity = 0;
+          tokenData.price = 0;
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait before retry
       }
-    } catch (error) {
-      console.error('Error fetching DexScreener data:', error.message, 'Stack:', error.stack);
-      tokenData.marketCap = 0;
-      tokenData.liquidity = 0;
-      tokenData.price = 0;
     }
 
     // Fetch dev holding and pool supply
