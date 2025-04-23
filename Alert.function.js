@@ -104,10 +104,10 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
         continue;
       }
 
-      const bypassFilters = process.env.BYPASS_FILTERS === 'true'; // FIXED: Removed || true
-      console.log('Bypass Filters in checkNewTokens:', bypassFilters); // ADDED LOG
-      console.log('Token Data Before Filter Check:', JSON.stringify(tokenData, null, 2)); // ADDED LOG
-      console.log('Filter Check Result in checkNewTokens:', checkAgainstFilters(tokenData, filters)); // ADDED LOG
+      const bypassFilters = process.env.BYPASS_FILTERS === 'true';
+      console.log('Bypass Filters in checkNewTokens:', bypassFilters);
+      console.log('Token Data Before Filter Check:', JSON.stringify(tokenData, null, 2));
+      console.log('Filter Check Result in checkNewTokens:', checkAgainstFilters(tokenData, filters));
 
       if (bypassFilters || checkAgainstFilters(tokenData, filters)) {
         console.log('Token passed filters in checkNewTokens:', JSON.stringify(tokenData, null, 2));
@@ -117,7 +117,14 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
         });
       } else {
         console.log('Token did not pass filters in checkNewTokens:', tokenMint, 'Token data:', JSON.stringify(tokenData, null, 2));
-        bot.sendMessage(chatId, `ℹ️ Token ${tokenMint} did not pass filters`).catch(err => {
+        let failMessage = `ℹ️ Token ${tokenMint} did not pass filters\nDetails:\n`;
+        failMessage += `Liquidity: ${tokenData.liquidity || 0} (Required: ${filters.liquidity.min}-${filters.liquidity.max})\n`;
+        failMessage += `Pool Supply: ${tokenData.poolSupply || 0}% (Required: ${filters.poolSupply.min}-${filters.poolSupply.max})\n`;
+        failMessage += `Dev Holding: ${tokenData.devHolding || 0}% (Required: ${filters.devHolding.min}-${filters.devHolding.max})\n`;
+        failMessage += `Launch Price: ${tokenData.price || 0} SOL (Required: ${filters.launchPrice.min}-${filters.launchPrice.max})\n`;
+        failMessage += `Mint Auth Revoked: ${tokenData.mintAuthRevoked ? 'Yes' : 'No'} (Required: ${filters.mintAuthRevoked ? 'Yes' : 'No'})\n`;
+        failMessage += `Freeze Auth Revoked: ${tokenData.freezeAuthRevoked ? 'Yes' : 'No'} (Required: ${filters.freezeAuthRevoked ? 'Yes' : 'No'})`;
+        bot.sendMessage(chatId, failMessage).catch(err => {
           console.error('Failed to send Telegram message for filter fail:', err.message);
         });
       }
