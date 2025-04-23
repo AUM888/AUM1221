@@ -62,7 +62,7 @@ const extractTokenInfo = async (event) => {
     let retries = 3;
     while (retries > 0) {
       try {
-        console.log(`Attempting DexScreener API call, retries left: ${retries}`); // ADDED LOG
+        console.log(`Attempting DexScreener API call, retries left: ${retries}`);
         const dexResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`, { timeout: 5000 });
         console.log('DexScreener response:', JSON.stringify(dexResponse.data, null, 2));
         const pair = dexResponse.data.pairs?.[0];
@@ -71,13 +71,32 @@ const extractTokenInfo = async (event) => {
           tokenData.marketCap = pair.fdv || 0;
           tokenData.liquidity = pair.liquidity?.usd || 0;
           tokenData.price = pair.priceUsd || 0;
-          console.log(`Successfully fetched DexScreener data: Liquidity=${tokenData.liquidity}, MarketCap=${tokenData.marketCap}, Price=${tokenData.price}`); // ADDED LOG
+          console.log(`Successfully fetched DexScreener data: Liquidity=${tokenData.liquidity}, MarketCap=${tokenData.marketCap}, Price=${tokenData.price}`);
           break;
         } else {
           console.log('No DexScreener pairs found for:', tokenAddress);
           tokenData.marketCap = 0;
           tokenData.liquidity = 0;
           tokenData.price = 0;
+          // ADDED: Fallback to Birdeye API if DexScreener fails
+          console.log('Falling back to Birdeye API for:', tokenAddress);
+          try {
+            const birdeyeResponse = await axios.get(`https://public-api.birdeye.so/public/price?address=${tokenAddress}`, {
+              headers: { 'X-API-KEY': process.env.BIRDEYE_API_KEY || 'your_birdeye_api_key' },
+              timeout: 5000
+            });
+            console.log('Birdeye API response:', JSON.stringify(birdeyeResponse.data, null, 2));
+            if (birdeyeResponse.data.success && birdeyeResponse.data.data) {
+              tokenData.price = birdeyeResponse.data.data.value || 0;
+              tokenData.liquidity = birdeyeResponse.data.data.liquidity || 0;
+              tokenData.marketCap = birdeyeResponse.data.data.mc || 0;
+              console.log(`Successfully fetched Birdeye data: Liquidity=${tokenData.liquidity}, MarketCap=${tokenData.marketCap}, Price=${tokenData.price}`);
+            } else {
+              console.log('No valid data from Birdeye API for:', tokenAddress);
+            }
+          } catch (birdeyeError) {
+            console.error('Error fetching Birdeye API data:', birdeyeError.message, 'Stack:', birdeyeError.stack);
+          }
           break;
         }
       } catch (error) {
@@ -87,7 +106,26 @@ const extractTokenInfo = async (event) => {
           tokenData.marketCap = 0;
           tokenData.liquidity = 0;
           tokenData.price = 0;
-          console.log('DexScreener API failed after retries, setting defaults: Liquidity=0, MarketCap=0, Price=0'); // ADDED LOG
+          console.log('DexScreener API failed after retries, setting defaults: Liquidity=0, MarketCap=0, Price=0');
+          // ADDED: Fallback to Birdeye API if DexScreener fails
+          console.log('Falling back to Birdeye API for:', tokenAddress);
+          try {
+            const birdeyeResponse = await axios.get(`https://public-api.birdeye.so/public/price?address=${tokenAddress}`, {
+              headers: { 'X-API-KEY': process.env.BIRDEYE_API_KEY || 'your_birdeye_api_key' },
+              timeout: 5000
+            });
+            console.log('Birdeye API response:', JSON.stringify(birdeyeResponse.data, null, 2));
+            if (birdeyeResponse.data.success && birdeyeResponse.data.data) {
+              tokenData.price = birdeyeResponse.data.data.value || 0;
+              tokenData.liquidity = birdeyeResponse.data.data.liquidity || 0;
+              tokenData.marketCap = birdeyeResponse.data.data.mc || 0;
+              console.log(`Successfully fetched Birdeye data: Liquidity=${tokenData.liquidity}, MarketCap=${tokenData.marketCap}, Price=${tokenData.price}`);
+            } else {
+              console.log('No valid data from Birdeye API for:', tokenAddress);
+            }
+          } catch (birdeyeError) {
+            console.error('Error fetching Birdeye API data:', birdeyeError.message, 'Stack:', birdeyeError.stack);
+          }
         }
         await new Promise(resolve => setTimeout(resolve, 1000)); // Wait before retry
       }
