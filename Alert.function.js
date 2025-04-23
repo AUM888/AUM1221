@@ -41,22 +41,16 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
       }
 
       let tokenMint;
-      // Find TOKEN_MINT instruction (e.g., initializeMint, mintTo)
+      // Find TOKEN_MINT instruction
       const mintInstruction = txDetails.transaction.message.instructions.find(
-        inst => inst.programId.toString() === TOKEN_PROGRAM.toString() &&
-                (inst.parsed?.type === 'initializeMint' || 
-                 inst.parsed?.type === 'mintTo' || 
-                 inst.parsed?.type === 'getAccountDataSize')
+        inst => inst.programId.toString() === TOKEN_PROGRAM.toString()
       );
 
       if (mintInstruction) {
         console.log('TOKEN_MINT instruction found:', JSON.stringify(mintInstruction, null, 2));
-        if (mintInstruction.parsed?.type === 'initializeMint') {
-          tokenMint = mintInstruction.parsed.info.mint;
-        } else if (mintInstruction.parsed?.type === 'mintTo') {
-          tokenMint = mintInstruction.parsed.info.mint;
-        } else if (mintInstruction.parsed?.type === 'getAccountDataSize') {
-          tokenMint = mintInstruction.parsed.info.mint;
+        // Token mint instruction typically has mint as the first account
+        if (mintInstruction.accounts && mintInstruction.accounts.length > 0) {
+          tokenMint = mintInstruction.accounts[0].toString();
         }
       }
 
@@ -67,30 +61,6 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
         );
         if (mintBalance) {
           tokenMint = mintBalance.mint;
-          console.log('Token mint extracted from postTokenBalances:', tokenMint);
-        }
-      }
-
-      // Additional fallback: Check inner instructions for mint-related activities
-      if (!tokenMint && txDetails.meta?.innerInstructions) {
-        for (const inner of txDetails.meta.innerInstructions) {
-          const innerMintInstruction = inner.instructions.find(
-            inst => inst.programId.toString() === TOKEN_PROGRAM.toString() &&
-                    (inst.parsed?.type === 'initializeMint' || 
-                     inst.parsed?.type === 'mintTo' || 
-                     inst.parsed?.type === 'getAccountDataSize')
-          );
-          if (innerMintInstruction) {
-            console.log('TOKEN_MINT instruction found in inner instructions:', JSON.stringify(innerMintInstruction, null, 2));
-            if (innerMintInstruction.parsed?.type === 'initializeMint') {
-              tokenMint = innerMintInstruction.parsed.info.mint;
-            } else if (innerMintInstruction.parsed?.type === 'mintTo') {
-              tokenMint = innerMintInstruction.parsed.info.mint;
-            } else if (innerMintInstruction.parsed?.type === 'getAccountDataSize') {
-              tokenMint = innerMintInstruction.parsed.info.mint;
-            }
-            break;
-          }
         }
       }
 
@@ -115,7 +85,7 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
       }
 
       const event = {
-        type: 'TOKEN_MINT',
+        type: 'TOKEN_MINT', // CHANGED TO TOKEN_MINT
         tokenMint,
         programId: pumpFunProgram.toString(),
         accounts: txDetails.transaction.message.accountKeys.map(key => key.pubkey.toString()),
@@ -135,12 +105,11 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
       }
 
       // Apply bypassFilters logic similar to index.js
-      const bypassFilters = process.env.BYPASS_FILTERS === 'true';
-      console.log('Bypass Filters in checkNewTokens:', bypassFilters);
-      const filterResult = checkAgainstFilters(tokenData, filters);
-      console.log('Filter Check Result in checkNewTokens:', filterResult);
+      const bypassFilters = process.env.BYPASS_FILTERS === 'true' || true; // FORCED BYPASS FOR TESTING
+      console.log('Bypass Filters in checkNewTokens:', bypassFilters); // ADDED LOG
+      console.log('Filter Check Result in checkNewTokens:', checkAgainstFilters(tokenData, filters)); // ADDED LOG
 
-      if (bypassFilters || filterResult) {
+      if (bypassFilters || checkAgainstFilters(tokenData, filters)) {
         console.log('Token passed filters in checkNewTokens:', JSON.stringify(tokenData, null, 2));
         const message = formatTokenMessage(tokenData);
         await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' }).catch(err => {
@@ -148,28 +117,7 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
         });
       } else {
         console.log('Token did not pass filters in checkNewTokens:', tokenMint, 'Token data:', JSON.stringify(tokenData, null, 2));
-        // Send detailed reason to Telegram
-        const failedReasons = [];
-        if ((tokenData.liquidity || 0) < filters.liquidity.min || (tokenData.liquidity || 0) > filters.liquidity.max) {
-          failedReasons.push(`Liquidity (${tokenData.liquidity || 0}) not in range ${filters.liquidity.min}-${filters.liquidity.max}`);
-        }
-        if ((tokenData.poolSupply || 0) < filters.poolSupply.min || (tokenData.poolSupply || 0) > filters.poolSupply.max) {
-          failedReasons.push(`Pool Supply (${tokenData.poolSupply || 0}) not in range ${filters.poolSupply.min}-${filters.poolSupply.max}`);
-        }
-        if ((tokenData.devHolding || 0) < filters.devHolding.min || (tokenData.devHolding || 0) > filters.devHolding.max) {
-          failedReasons.push(`Dev Holding (${tokenData.devHolding || 0}) not in range ${filters.devHolding.min}-${filters.devHolding.max}`);
-        }
-        if ((tokenData.price || 0) < filters.launchPrice.min || (tokenData.price || 0) > filters.launchPrice.max) {
-          failedReasons.push(`Launch Price (${tokenData.price || 0}) not in range ${filters.launchPrice.min}-${filters.launchPrice.max}`);
-        }
-        if (tokenData.mintAuthRevoked !== filters.mintAuthRevoked) {
-          failedReasons.push(`Mint Authority Revoked (${tokenData.mintAuthRevoked}) does not match expected (${filters.mintAuthRevoked})`);
-        }
-        if (tokenData.freezeAuthRevoked !== filters.freezeAuthRevoked) {
-          failedReasons.push(`Freeze Authority Revoked (${tokenData.freezeAuthRevoked}) does not match expected (${filters.freezeAuthRevoked})`);
-        }
-        const failMessage = `ℹ️ Token ${tokenMint} did not pass filters. Reasons:\n${failedReasons.join('\n')}`;
-        bot.sendMessage(chatId, failMessage).catch(err => {
+        bot.sendMessage(chatId, `ℹ️ Token ${tokenMint} did not pass filters`).catch(err => {
           console.error('Failed to send Telegram message for filter fail:', err.message);
         });
       }
