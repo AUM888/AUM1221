@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { Connection, PublicKey } = require('@solana/web3.js');
+const Moralis = require('@moralisweb3/common-sol-utils');
 
 const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, {
   commitment: 'confirmed',
@@ -7,6 +8,11 @@ const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${pro
 });
 
 const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+
+// Initialize Moralis
+Moralis.start({
+  apiKey: process.env.MORALIS_API_KEY,
+});
 
 const extractTokenInfo = async (event) => {
   try {
@@ -38,7 +44,7 @@ const extractTokenInfo = async (event) => {
 
     console.log('Fetching token data for address:', tokenAddress);
 
-    // Fetch token metadata
+    // Fetch token metadata from Solana
     let tokenData = { address: tokenAddress };
     try {
       const mint = await connection.getParsedAccountInfo(new PublicKey(tokenAddress));
@@ -58,36 +64,51 @@ const extractTokenInfo = async (event) => {
       tokenData.freezeAuthRevoked = false;
     }
 
-    // Fetch market data from DexScreener with retry logic
+    // Fetch market data from Moralis API with retry logic
     let retries = 3;
-    while (retries > 0) {
+    let moralisDataFetched = false;
+    for (let attempt = 1; attempt <= retries; attempt++) {
       try {
-        const dexResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`, { timeout: 5000 });
-        console.log('DexScreener Response for', tokenAddress, JSON.stringify(dexResponse.data, null, 2)); // ADDED LOG
-        const pair = dexResponse.data.pairs?.[0];
-        if (pair) {
-          tokenData.name = pair.baseToken?.name || tokenData.name;
-          tokenData.marketCap = pair.fdv || 0;
-          tokenData.liquidity = pair.liquidity?.usd || 0;
-          tokenData.price = pair.priceUsd || 0;
+        console.log(`Attempt ${attempt} to fetch Moralis data for`, tokenAddress);
+        const response = await Moralis.SolApi.token.getTokenPrice({
+          network: 'mainnet',
+          address: tokenAddress,
+        });
+        console.log('Moralis Response for', tokenAddress, JSON.stringify(response.raw, null, 2));
+        const tokenInfo = response.raw;
+        if (tokenInfo && tokenInfo.usdPrice) {
+          tokenData.name = tokenInfo.name || tokenData.name;
+          tokenData.marketCap = parseFloat(tokenInfo.marketCap) || parseFloat(tokenInfo.usdPrice) * 1000000000 || 0; // Fallback: Assume 1B supply if marketCap not provided
+          tokenData.liquidity = parseFloat(tokenInfo.liquidity) || 0; // Moralis may not provide liquidity, fallback to 0
+          tokenData.price = parseFloat(tokenInfo.usdPrice) || 0;
+          console.log('Moralis token info found:', JSON.stringify(tokenInfo, null, 2));
+          moralisDataFetched = true;
           break;
         } else {
-          console.log('No DexScreener pairs found for:', tokenAddress);
+          console.log('No valid Moralis data found for:', tokenAddress, 'Response:', JSON.stringify(response.raw, null, 2));
           tokenData.marketCap = 0;
           tokenData.liquidity = 0;
           tokenData.price = 0;
-          break;
         }
       } catch (error) {
-        console.error('Error fetching DexScreener data, retries left:', retries, 'Error:', error.message, 'Stack:', error.stack);
-        retries--;
-        if (retries === 0) {
-          tokenData.marketCap = 0;
-          tokenData.liquidity = 0;
-          tokenData.price = 0;
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait before retry
+        console.error('Error fetching Moralis data, attempt:', attempt, 'Retries left:', retries - attempt, 'Error:', error.message, 'Stack:', error.stack);
+        tokenData.marketCap = 0;
+        tokenData.liquidity = 0;
+        tokenData.price = 0;
       }
+      if (!moralisDataFetched && attempt < retries) {
+        console.log(`Waiting 5 seconds before retrying Moralis for`, tokenAddress);
+        await new Promise(resolve => setTimeout(resolve, 5000)); // 5s delay between retries
+      }
+    }
+
+    if (!moralisDataFetched) {
+      console.log('Failed to fetch Moralis data after all retries for:', tokenAddress);
+      const chatId = process.env.TELEGRAM_CHAT_ID || '-1002511600127';
+      const bot = require('./index').bot; // Assuming bot is exported from index.js
+      bot.sendMessage(chatId, `⚠️ Failed to fetch Moralis data for token: ${tokenAddress}`).catch(err => {
+        console.error('Failed to send Telegram message for Moralis failure:', err.message);
+      });
     }
 
     // Fetch dev holding and pool supply
@@ -98,7 +119,7 @@ const extractTokenInfo = async (event) => {
       console.log('Total supply:', totalSupply);
       const devHolding = largestAccounts.value[0]?.uiAmount / totalSupply * 100 || 0;
       tokenData.devHolding = devHolding;
-      tokenData.poolSupply = totalSupply > 0 ? (totalSupply - devHolding) / totalSupply * 100 : 0;
+      tokenData.poolSupply = totalSupply > 0 ? (100 - devHolding) : 0;
     } catch (error) {
       console.error('Error fetching token supply or accounts:', error.message, 'Stack:', error.stack);
       tokenData.devHolding = 0;
@@ -114,68 +135,51 @@ const extractTokenInfo = async (event) => {
 };
 
 const checkAgainstFilters = (tokenData, filters) => {
-  try {
-    console.log('Checking token data against filters:', JSON.stringify(tokenData, null, 2), 'Filters:', JSON.stringify(filters, null, 2));
-    if (!tokenData) {
-      console.log('No token data, failing filters');
-      return false;
-    }
-    const checks = [
-      { field: 'liquidity', value: tokenData.liquidity || 0, min: filters.liquidity.min, max: filters.liquidity.max },
-      { field: 'poolSupply', value: tokenData.poolSupply || 0, min: filters.poolSupply.min, max: filters.poolSupply.max },
-      { field: 'devHolding', value: tokenData.devHolding || 0, min: filters.devHolding.min, max: filters.devHolding.max },
-      { field: 'launchPrice', value: tokenData.price || 0, min: filters.launchPrice.min, max: filters.launchPrice.max },
-      { field: 'mintAuthRevoked', value: tokenData.mintAuthRevoked, expected: filters.mintAuthRevoked },
-      { field: 'freezeAuthRevoked', value: tokenData.freezeAuthRevoked, expected: filters.freezeAuthRevoked }
-    ];
+  if (!tokenData) return { passed: false, details: 'No token data' };
 
-    for (const check of checks) {
-      if (check.field === 'mintAuthRevoked' || check.field === 'freezeAuthRevoked') {
-        if (check.value !== check.expected) {
-          console.log(`Filter failed: ${check.field}, Expected: ${check.expected}, Got: ${check.value}`);
-          return false;
-        }
-      } else {
-        if (check.value < check.min || check.value > check.max) {
-          console.log(`Filter failed: ${check.field}, Value: ${check.value}, Min: ${check.min}, Max: ${check.max}`);
-          return false;
-        }
-      }
-    }
+  const details = [];
+  let passed = true;
 
-    console.log('Token passed all filters');
-    return true;
-  } catch (error) {
-    console.error('checkAgainstFilters error:', error.message, 'Stack:', error.stack);
-    return false;
+  if (tokenData.liquidity < filters.liquidity.min || tokenData.liquidity > filters.liquidity.max) {
+    details.push(`Liquidity: ${tokenData.liquidity} (Required: ${filters.liquidity.min}-${filters.liquidity.max})`);
+    passed = false;
   }
+  if (tokenData.poolSupply < filters.poolSupply.min || tokenData.poolSupply > filters.poolSupply.max) {
+    details.push(`Pool Supply: ${tokenData.poolSupply}% (Required: ${filters.poolSupply.min}-${filters.poolSupply.max})`);
+    passed = false;
+  }
+  if (tokenData.devHolding < filters.devHolding.min || tokenData.devHolding > filters.devHolding.max) {
+    details.push(`Dev Holding: ${tokenData.devHolding}% (Required: ${filters.devHolding.min}-${filters.devHolding.max})`);
+    passed = false;
+  }
+  if (tokenData.price < filters.launchPrice.min || tokenData.price > filters.launchPrice.max) {
+    details.push(`Launch Price: ${tokenData.price} SOL (Required: ${filters.launchPrice.min}-${filters.launchPrice.max})`);
+    passed = false;
+  }
+  if (tokenData.mintAuthRevoked !== filters.mintAuthRevoked) {
+    details.push(`Mint Auth Revoked: ${tokenData.mintAuthRevoked ? 'Yes' : 'No'} (Required: ${filters.mintAuthRevoked ? 'Yes' : 'No'})`);
+    passed = false;
+  }
+  if (tokenData.freezeAuthRevoked !== filters.freezeAuthRevoked) {
+    details.push(`Freeze Auth Revoked: ${tokenData.freezeAuthRevoked ? 'Yes' : 'No'} (Required: ${filters.freezeAuthRevoked ? 'Yes' : 'No'})`);
+    passed = false;
+  }
+
+  return { passed, details };
 };
 
 const formatTokenMessage = (tokenData) => {
-  try {
-    console.log('Formatting token message for:', JSON.stringify(tokenData, null, 2));
-    if (!tokenData || !tokenData.address) {
-      console.log('Invalid token data, returning error message');
-      return 'Error formatting token message: Invalid token data';
-    }
-    const message = `🌟 *New Token Alert* 🌟
-📛 *Token Name*: ${tokenData.name || 'Unknown'}
-📍 *Token Address*: \`${tokenData.address || 'N/A'}\`
-💰 *Market Cap*: $${tokenData.marketCap ? tokenData.marketCap.toLocaleString() : 'N/A'}
-💧 *Liquidity*: $${tokenData.liquidity ? tokenData.liquidity.toLocaleString() : 'N/A'}
-👨‍💻 *Dev Holding*: ${tokenData.devHolding ? tokenData.devHolding.toFixed(2) : 'N/A'}%
-🏊 *Pool Supply*: ${tokenData.poolSupply ? tokenData.poolSupply.toFixed(2) : 'N/A'}%
-🚀 *Launch Price*: ${tokenData.price ? tokenData.price : 'N/A'} SOL
+  return `🌟 *New Token Alert* 🌟
+📛 *Token Name*: ${tokenData.name}
+📍 *Token Address*: \`${tokenData.address}\`
+💰 *Market Cap*: $${tokenData.marketCap.toFixed(2)}
+💧 *Liquidity*: $${tokenData.liquidity.toFixed(2)}
+👨‍💻 *Dev Holding*: ${tokenData.devHolding.toFixed(2)}%
+🏊 *Pool Supply*: ${tokenData.poolSupply.toFixed(2)}%
+🚀 *Launch Price*: ${tokenData.price} SOL
 🔒 *Mint Authority*: ${tokenData.mintAuthRevoked ? '✅ Revoked' : '❌ Not Revoked'}
 🧊 *Freeze Authority*: ${tokenData.freezeAuthRevoked ? '✅ Revoked' : '❌ Not Revoked'}
-📈 *DexScreener*: [View on DexScreener](https://dexscreener.com/solana/${tokenData.address || ''})`;
-
-    console.log('Formatted message:', message);
-    return message;
-  } catch (error) {
-    console.error('formatTokenMessage error:', error.message, 'Stack:', error.stack);
-    return 'Error formatting token message';
-  }
+📈 *DexScreener*: [View on DexScreener](https://dexscreener.com/solana/${tokenData.address})`;
 };
 
 module.exports = { extractTokenInfo, checkAgainstFilters, formatTokenMessage };
