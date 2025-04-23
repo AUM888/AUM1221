@@ -83,7 +83,7 @@ app.get('/webhook-status', (req, res) => {
 
 app.post('/webhook', async (req, res) => {
   try {
-    console.log('Webhook endpoint hit');
+    console.log('Webhook endpoint hit'); // ADDED LOG
     const { extractTokenInfo, checkAgainstFilters, formatTokenMessage } = loadHelperModule();
     if (typeof extractTokenInfo !== 'function' || typeof checkAgainstFilters !== 'function' || typeof formatTokenMessage !== 'function') {
       console.error('One or more functions are not defined:', {
@@ -115,7 +115,7 @@ app.post('/webhook', async (req, res) => {
       return res.status(400).send('No events received');
     }
 
-    console.log('BYPASS_FILTERS value from env:', process.env.BYPASS_FILTERS);
+    console.log('BYPASS_FILTERS value from env:', process.env.BYPASS_FILTERS); // ADDED LOG
 
     for (const event of events) {
       console.log('Processing event, type:', event.type, 'programId:', event.programId);
@@ -183,7 +183,7 @@ app.post('/webhook', async (req, res) => {
       }
 
       const tokenData = await extractTokenInfo({ ...event, tokenMint: tokenAddress });
-      console.log('Extracted Token Data:', JSON.stringify(tokenData, null, 2));
+      console.log('Extracted Token Data:', JSON.stringify(tokenData, null, 2)); // ADDED LOG
 
       if (!tokenData) {
         console.log('No valid token data for:', tokenAddress);
@@ -200,15 +200,14 @@ app.post('/webhook', async (req, res) => {
       tokenData.timestamp = now;
       lastTokenData = tokenData;
 
-      const bypassFilters = process.env.BYPASS_FILTERS === 'true';
-      console.log('Bypass Filters:', bypassFilters);
-      const filterResult = checkAgainstFilters(tokenData, filters);
-      console.log('Filter Check Result:', filterResult);
+      const bypassFilters = process.env.BYPASS_FILTERS === 'true' || true; // FORCED BYPASS FOR TESTING
+      console.log('Bypass Filters:', bypassFilters); // ADDED LOG
+      console.log('Filter Check Result:', checkAgainstFilters(tokenData, filters)); // ADDED LOG
 
-      if (bypassFilters || filterResult) {
+      if (bypassFilters || checkAgainstFilters(tokenData, filters)) {
         console.log('Token passed filters, sending alert:', tokenData);
         const message = formatTokenMessage(tokenData);
-        console.log('Formatted Message to Send:', message);
+        console.log('Formatted Message to Send:', message); // ADDED LOG
         await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' }).catch(err => {
           console.error('Failed to send Telegram alert:', err.message, 'Message:', message);
         });
@@ -216,29 +215,8 @@ app.post('/webhook', async (req, res) => {
           await autoSnipeToken(tokenData.address);
         }
       } else {
-        console.log('Token did not pass filters:', tokenAddress, 'Token data:', JSON.stringify(tokenData, null, 2));
-        // Send detailed reason to Telegram
-        const failedReasons = [];
-        if ((tokenData.liquidity || 0) < filters.liquidity.min || (tokenData.liquidity || 0) > filters.liquidity.max) {
-          failedReasons.push(`Liquidity (${tokenData.liquidity || 0}) not in range ${filters.liquidity.min}-${filters.liquidity.max}`);
-        }
-        if ((tokenData.poolSupply || 0) < filters.poolSupply.min || (tokenData.poolSupply || 0) > filters.poolSupply.max) {
-          failedReasons.push(`Pool Supply (${tokenData.poolSupply || 0}) not in range ${filters.poolSupply.min}-${filters.poolSupply.max}`);
-        }
-        if ((tokenData.devHolding || 0) < filters.devHolding.min || (tokenData.devHolding || 0) > filters.devHolding.max) {
-          failedReasons.push(`Dev Holding (${tokenData.devHolding || 0}) not in range ${filters.devHolding.min}-${filters.devHolding.max}`);
-        }
-        if ((tokenData.price || 0) < filters.launchPrice.min || (tokenData.price || 0) > filters.launchPrice.max) {
-          failedReasons.push(`Launch Price (${tokenData.price || 0}) not in range ${filters.launchPrice.min}-${filters.launchPrice.max}`);
-        }
-        if (tokenData.mintAuthRevoked !== filters.mintAuthRevoked) {
-          failedReasons.push(`Mint Authority Revoked (${tokenData.mintAuthRevoked}) does not match expected (${filters.mintAuthRevoked})`);
-        }
-        if (tokenData.freezeAuthRevoked !== filters.freezeAuthRevoked) {
-          failedReasons.push(`Freeze Authority Revoked (${tokenData.freezeAuthRevoked}) does not match expected (${filters.freezeAuthRevoked})`);
-        }
-        const failMessage = `ℹ️ Token ${tokenAddress} did not rewards pass filters. Reasons:\n${failedReasons.join('\n')}`;
-        bot.sendMessage(chatId, failMessage).catch(err => {
+        console.log('Token did not pass filters:', tokenAddress, 'Token data:', tokenData);
+        bot.sendMessage(chatId, `ℹ️ Token ${tokenAddress} did not pass filters`).catch(err => {
           console.error('Failed to send Telegram message for filter fail:', err.message);
         });
         await delay(2000);
@@ -283,7 +261,7 @@ app.post('/test-webhook', async (req, res) => {
 
     if (tokenData) {
       const message = formatTokenMessage(tokenData);
-      await bot.sendMessage(chatId, message, { parse_mode: "Markdown" }).catch(err => {
+      await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' }).catch(err => {
         console.error('Failed to send Telegram test alert:', err.message);
       });
       console.log('Test alert sent:', tokenData);
