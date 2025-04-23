@@ -85,7 +85,7 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
       }
 
       const event = {
-        type: 'TOKEN_MINT', // CHANGED TO TOKEN_MINT
+        type: 'TOKEN_MINT',
         tokenMint,
         programId: pumpFunProgram.toString(),
         accounts: txDetails.transaction.message.accountKeys.map(key => key.pubkey.toString()),
@@ -105,9 +105,9 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
       }
 
       // Apply bypassFilters logic similar to index.js
-      const bypassFilters = process.env.BYPASS_FILTERS === 'true' || true; // FORCED BYPASS FOR TESTING
-      console.log('Bypass Filters in checkNewTokens:', bypassFilters); // ADDED LOG
-      console.log('Filter Check Result in checkNewTokens:', checkAgainstFilters(tokenData, filters)); // ADDED LOG
+      const bypassFilters = process.env.BYPASS_FILTERS === 'true'; // REMOVED FORCED BYPASS
+      console.log('Bypass Filters in checkNewTokens:', bypassFilters);
+      console.log('Filter Check Result in checkNewTokens:', checkAgainstFilters(tokenData, filters));
 
       if (bypassFilters || checkAgainstFilters(tokenData, filters)) {
         console.log('Token passed filters in checkNewTokens:', JSON.stringify(tokenData, null, 2));
