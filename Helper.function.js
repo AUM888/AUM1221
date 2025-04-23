@@ -62,7 +62,6 @@ const extractTokenInfo = async (event) => {
     let retries = 3;
     while (retries > 0) {
       try {
-        console.log(`Attempting DexScreener API call, retries left: ${retries}`);
         const dexResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`, { timeout: 5000 });
         console.log('DexScreener response:', JSON.stringify(dexResponse.data, null, 2));
         const pair = dexResponse.data.pairs?.[0];
@@ -71,31 +70,21 @@ const extractTokenInfo = async (event) => {
           tokenData.marketCap = pair.fdv || 0;
           tokenData.liquidity = pair.liquidity?.usd || 0;
           tokenData.price = pair.priceUsd || 0;
-          console.log(`Successfully fetched DexScreener data: Liquidity=${tokenData.liquidity}, MarketCap=${tokenData.marketCap}, Price=${tokenData.price}`);
           break;
         } else {
           console.log('No DexScreener pairs found for:', tokenAddress);
           tokenData.marketCap = 0;
           tokenData.liquidity = 0;
           tokenData.price = 0;
-          // Fallback: Use a mock liquidity value for testing
-          console.log('Falling back to mock liquidity for:', tokenAddress);
-          tokenData.liquidity = 5000; // Mock value to pass liquidity filter for testing
-          tokenData.price = 0.000000003; // Mock value to pass launch price filter for testing
           break;
         }
       } catch (error) {
         console.error('Error fetching DexScreener data, retries left:', retries, 'Error:', error.message, 'Stack:', error.stack);
         retries--;
         if (retries === 0) {
-          console.log('DexScreener API failed after retries, setting defaults: Liquidity=0, MarketCap=0, Price=0');
           tokenData.marketCap = 0;
           tokenData.liquidity = 0;
           tokenData.price = 0;
-          // Fallback: Use a mock liquidity value for testing
-          console.log('Falling back to mock liquidity for:', tokenAddress);
-          tokenData.liquidity = 5000; // Mock value to pass liquidity filter for testing
-          tokenData.price = 0.000000003; // Mock value to pass launch price filter for testing
         }
         await new Promise(resolve => setTimeout(resolve, 1000)); // Wait before retry
       }
