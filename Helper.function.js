@@ -63,7 +63,7 @@ const extractTokenInfo = async (event) => {
     while (retries > 0) {
       try {
         const dexResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`, { timeout: 5000 });
-        console.log('DexScreener response:', JSON.stringify(dexResponse.data, null, 2));
+        console.log('DexScreener Response for', tokenAddress, JSON.stringify(dexResponse.data, null, 2)); // ADDED LOG
         const pair = dexResponse.data.pairs?.[0];
         if (pair) {
           tokenData.name = pair.baseToken?.name || tokenData.name;
