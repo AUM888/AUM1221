@@ -217,7 +217,7 @@ app.post('/webhook', async (req, res) => {
         }
       } else {
         console.log('Token did not pass filters:', tokenAddress, 'Token data:', JSON.stringify(tokenData, null, 2));
-        // ADDED: Send detailed reason to Telegram
+        // Send detailed reason to Telegram
         const failedReasons = [];
         if ((tokenData.liquidity || 0) < filters.liquidity.min || (tokenData.liquidity || 0) > filters.liquidity.max) {
           failedReasons.push(`Liquidity (${tokenData.liquidity || 0}) not in range ${filters.liquidity.min}-${filters.liquidity.max}`);
@@ -237,7 +237,7 @@ app.post('/webhook', async (req, res) => {
         if (tokenData.freezeAuthRevoked !== filters.freezeAuthRevoked) {
           failedReasons.push(`Freeze Authority Revoked (${tokenData.freezeAuthRevoked}) does not match expected (${filters.freezeAuthRevoked})`);
         }
-        const failMessage = `ℹ️ Token ${tokenAddress} did not pass filters. Reasons:\n${failedReasons.join('\n')}`;
+        const failMessage = `ℹ️ Token ${tokenAddress} did not rewards pass filters. Reasons:\n${failedReasons.join('\n')}`;
         bot.sendMessage(chatId, failMessage).catch(err => {
           console.error('Failed to send Telegram message for filter fail:', err.message);
         });
