@@ -41,16 +41,22 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
       }
 
       let tokenMint;
-      // Find TOKEN_MINT instruction
+      // Find TOKEN_MINT instruction (e.g., initializeMint, mintTo)
       const mintInstruction = txDetails.transaction.message.instructions.find(
-        inst => inst.programId.toString() === TOKEN_PROGRAM.toString()
+        inst => inst.programId.toString() === TOKEN_PROGRAM.toString() &&
+                (inst.parsed?.type === 'initializeMint' || 
+                 inst.parsed?.type === 'mintTo' || 
+                 inst.parsed?.type === 'getAccountDataSize')
       );
 
       if (mintInstruction) {
         console.log('TOKEN_MINT instruction found:', JSON.stringify(mintInstruction, null, 2));
-        // Token mint instruction typically has mint as the first account
-        if (mintInstruction.accounts && mintInstruction.accounts.length > 0) {
-          tokenMint = mintInstruction.accounts[0].toString();
+        if (mintInstruction.parsed?.type === 'initializeMint') {
+          tokenMint = mintInstruction.parsed.info.mint;
+        } else if (mintInstruction.parsed?.type === 'mintTo') {
+          tokenMint = mintInstruction.parsed.info.mint;
+        } else if (mintInstruction.parsed?.type === 'getAccountDataSize') {
+          tokenMint = mintInstruction.parsed.info.mint;
         }
       }
 
@@ -61,6 +67,30 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
         );
         if (mintBalance) {
           tokenMint = mintBalance.mint;
+          console.log('Token mint extracted from postTokenBalances:', tokenMint);
+        }
+      }
+
+      // Additional fallback: Check inner instructions for mint-related activities
+      if (!tokenMint && txDetails.meta?.innerInstructions) {
+        for (const inner of txDetails.meta.innerInstructions) {
+          const innerMintInstruction = inner.instructions.find(
+            inst => inst.programId.toString() === TOKEN_PROGRAM.toString() &&
+                    (inst.parsed?.type === 'initializeMint' || 
+                     inst.parsed?.type === 'mintTo' || 
+                     inst.parsed?.type === 'getAccountDataSize')
+          );
+          if (innerMintInstruction) {
+            console.log('TOKEN_MINT instruction found in inner instructions:', JSON.stringify(innerMintInstruction, null, 2));
+            if (innerMintInstruction.parsed?.type === 'initializeMint') {
+              tokenMint = innerMintInstruction.parsed.info.mint;
+            } else if (innerMintInstruction.parsed?.type === 'mintTo') {
+              tokenMint = innerMintInstruction.parsed.info.mint;
+            } else if (innerMintInstruction.parsed?.type === 'getAccountDataSize') {
+              tokenMint = innerMintInstruction.parsed.info.mint;
+            }
+            break;
+          }
         }
       }
 
@@ -118,7 +148,7 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
         });
       } else {
         console.log('Token did not pass filters in checkNewTokens:', tokenMint, 'Token data:', JSON.stringify(tokenData, null, 2));
-        // ADDED: Send detailed reason to Telegram
+        // Send detailed reason to Telegram
         const failedReasons = [];
         if ((tokenData.liquidity || 0) < filters.liquidity.min || (tokenData.liquidity || 0) > filters.liquidity.max) {
           failedReasons.push(`Liquidity (${tokenData.liquidity || 0}) not in range ${filters.liquidity.min}-${filters.liquidity.max}`);
