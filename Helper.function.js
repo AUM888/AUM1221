@@ -62,6 +62,7 @@ const extractTokenInfo = async (event) => {
     let retries = 3;
     while (retries > 0) {
       try {
+        console.log(`Attempting DexScreener API call, retries left: ${retries}`); // ADDED LOG
         const dexResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`, { timeout: 5000 });
         console.log('DexScreener response:', JSON.stringify(dexResponse.data, null, 2));
         const pair = dexResponse.data.pairs?.[0];
@@ -70,6 +71,7 @@ const extractTokenInfo = async (event) => {
           tokenData.marketCap = pair.fdv || 0;
           tokenData.liquidity = pair.liquidity?.usd || 0;
           tokenData.price = pair.priceUsd || 0;
+          console.log(`Successfully fetched DexScreener data: Liquidity=${tokenData.liquidity}, MarketCap=${tokenData.marketCap}, Price=${tokenData.price}`); // ADDED LOG
           break;
         } else {
           console.log('No DexScreener pairs found for:', tokenAddress);
@@ -85,6 +87,7 @@ const extractTokenInfo = async (event) => {
           tokenData.marketCap = 0;
           tokenData.liquidity = 0;
           tokenData.price = 0;
+          console.log('DexScreener API failed after retries, setting defaults: Liquidity=0, MarketCap=0, Price=0'); // ADDED LOG
         }
         await new Promise(resolve => setTimeout(resolve, 1000)); // Wait before retry
       }
