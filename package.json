@@ -14,7 +14,6 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
     "moralis": "^2.22.0",
-    "@moralisweb3/solana-utils": "^2.22.0",
     "node-telegram-bot-api": "^0.66.0",
     "ws": "^8.18.0"
   }
