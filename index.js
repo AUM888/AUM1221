@@ -61,8 +61,8 @@ let filters = {
   poolSupply: { min: 60, max: 95 },
   devHolding: { min: 2, max: 10 },
   launchPrice: { min: 0.0000000022, max: 0.0000000058 },
-  mintAuthRevoked: false,
-  freezeAuthRevoked: false
+  mintAuthRevoked: true,
+  freezeAuthRevoked: true
 };
 let lastTokenData = null;
 let userStates = {};
@@ -83,7 +83,7 @@ app.get('/webhook-status', (req, res) => {
 
 app.post('/webhook', async (req, res) => {
   try {
-    console.log('Webhook endpoint hit');
+    console.log('Webhook endpoint hit'); // ADDED LOG
     const { extractTokenInfo, checkAgainstFilters, formatTokenMessage } = loadHelperModule();
     if (typeof extractTokenInfo !== 'function' || typeof checkAgainstFilters !== 'function' || typeof formatTokenMessage !== 'function') {
       console.error('One or more functions are not defined:', {
@@ -115,7 +115,7 @@ app.post('/webhook', async (req, res) => {
       return res.status(400).send('No events received');
     }
 
-    console.log('BYPASS_FILTERS value from env:', process.env.BYPASS_FILTERS);
+    console.log('BYPASS_FILTERS value from env:', process.env.BYPASS_FILTERS); // ADDED LOG
 
     for (const event of events) {
       console.log('Processing event, type:', event.type, 'programId:', event.programId);
@@ -183,7 +183,7 @@ app.post('/webhook', async (req, res) => {
       }
 
       const tokenData = await extractTokenInfo({ ...event, tokenMint: tokenAddress });
-      console.log('Extracted Token Data:', JSON.stringify(tokenData, null, 2));
+      console.log('Extracted Token Data:', JSON.stringify(tokenData, null, 2)); // ADDED LOG
 
       if (!tokenData) {
         console.log('No valid token data for:', tokenAddress);
@@ -200,15 +200,14 @@ app.post('/webhook', async (req, res) => {
       tokenData.timestamp = now;
       lastTokenData = tokenData;
 
-      const bypassFilters = process.env.BYPASS_FILTERS === 'true';
-      console.log('Bypass Filters:', bypassFilters);
-      console.log('Token Data Before Filter Check:', JSON.stringify(tokenData, null, 2));
-      console.log('Filter Check Result:', checkAgainstFilters(tokenData, filters));
+      const bypassFilters = process.env.BYPASS_FILTERS === 'true' || true; // FORCED BYPASS FOR TESTING
+      console.log('Bypass Filters:', bypassFilters); // ADDED LOG
+      console.log('Filter Check Result:', checkAgainstFilters(tokenData, filters)); // ADDED LOG
 
       if (bypassFilters || checkAgainstFilters(tokenData, filters)) {
         console.log('Token passed filters, sending alert:', tokenData);
         const message = formatTokenMessage(tokenData);
-        console.log('Formatted Message to Send:', message);
+        console.log('Formatted Message to Send:', message); // ADDED LOG
         await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' }).catch(err => {
           console.error('Failed to send Telegram alert:', err.message, 'Message:', message);
         });
@@ -217,14 +216,7 @@ app.post('/webhook', async (req, res) => {
         }
       } else {
         console.log('Token did not pass filters:', tokenAddress, 'Token data:', tokenData);
-        let failMessage = `ℹ️ Token ${tokenAddress} did not pass filters\nDetails:\n`;
-        failMessage += `Liquidity: ${tokenData.liquidity || 0} (Required: ${filters.liquidity.min}-${filters.liquidity.max})\n`;
-        failMessage += `Pool Supply: ${tokenData.poolSupply || 0}% (Required: ${filters.poolSupply.min}-${filters.poolSupply.max})\n`;
-        failMessage += `Dev Holding: ${tokenData.devHolding || 0}% (Required: ${filters.devHolding.min}-${filters.devHolding.max})\n`;
-        failMessage += `Launch Price: ${tokenData.price || 0} SOL (Required: ${filters.launchPrice.min}-${filters.launchPrice.max})\n`;
-        failMessage += `Mint Auth Revoked: ${tokenData.mintAuthRevoked ? 'Yes' : 'No'} (Required: ${filters.mintAuthRevoked ? 'Yes' : 'No'})\n`;
-        failMessage += `Freeze Auth Revoked: ${tokenData.freezeAuthRevoked ? 'Yes' : 'No'} (Required: ${filters.freezeAuthRevoked ? 'Yes' : 'No'})`;
-        bot.sendMessage(chatId, failMessage).catch(err => {
+        bot.sendMessage(chatId, `ℹ️ Token ${tokenAddress} did not pass filters`).catch(err => {
           console.error('Failed to send Telegram message for filter fail:', err.message);
         });
         await delay(2000);
