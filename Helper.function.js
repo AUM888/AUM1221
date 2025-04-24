@@ -1,12 +1,4 @@
-const axios = require('axios');
-const { Connection, PublicKey } = require('@solana/web3.js');
-
-const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, {
-  commitment: 'confirmed',
-  maxSupportedTransactionVersion: 0
-});
-
-const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+const Moralis = require('moralis').default;
 
 const extractTokenInfo = async (event) => {
   try {
@@ -20,83 +12,39 @@ const extractTokenInfo = async (event) => {
       return null;
     }
 
-    console.log('Validating token address:', tokenAddress);
-
-    // Validate token address is a mint account
-    let accountInfo;
-    try {
-      accountInfo = await connection.getParsedAccountInfo(new PublicKey(tokenAddress));
-      console.log('Account info for token:', tokenAddress, JSON.stringify(accountInfo, null, 2));
-      if (!accountInfo.value || accountInfo.value.owner.toString() !== TOKEN_PROGRAM.toString()) {
-        console.log('Address is not a TOKEN mint account, returning null:', tokenAddress);
-        return null;
-      }
-    } catch (error) {
-      console.error('Error validating token address:', tokenAddress, 'Error:', error.message, 'Stack:', error.stack);
-      return null;
-    }
-
-    console.log('Fetching token data for address:', tokenAddress);
-
-    // Fetch token metadata
+    // Fetch token metadata using Moralis Solana API
     let tokenData = { address: tokenAddress };
     try {
-      const mint = await connection.getParsedAccountInfo(new PublicKey(tokenAddress));
-      console.log('Mint data fetched:', JSON.stringify(mint, null, 2));
-      if (!mint.value || !mint.value.data.parsed) {
-        console.log('No valid mint data found for:', tokenAddress);
-        return null;
-      }
-      tokenData.name = mint.value.data.parsed.info?.name || 'Unknown';
-      tokenData.decimals = mint.value.data.parsed.info.decimals || 9;
-      tokenData.mintAuthRevoked = !mint.value.data.parsed.info.mintAuthority;
-      tokenData.freezeAuthRevoked = !mint.value.data.parsed.info.freezeAuthority;
+      const response = await Moralis.Solana.getTokenMetadata({
+        address: tokenAddress,
+        network: 'mainnet',
+      });
+      console.log('Moralis token metadata:', JSON.stringify(response, null, 2));
+
+      tokenData.name = response.name || 'Unknown';
+      tokenData.decimals = response.decimals || 9;
+      tokenData.mintAuthRevoked = response.mintAuthority === null;
+      tokenData.freezeAuthRevoked = response.freezeAuthority === null;
+      tokenData.price = response.price || 0;
+      tokenData.liquidity = response.liquidity?.usd || 0;
+      tokenData.marketCap = response.marketCap || 0;
     } catch (error) {
-      console.error('Error fetching mint data:', error.message, 'Stack:', error.stack);
+      console.error('Error fetching Moralis token metadata:', error.message, 'Stack:', error.stack);
       tokenData.name = 'Unknown';
       tokenData.mintAuthRevoked = false;
       tokenData.freezeAuthRevoked = false;
-    }
-
-    // Fetch market data from DexScreener with retry logic
-    let retries = 3;
-    while (retries > 0) {
-      try {
-        const dexResponse = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`, { timeout: 5000 });
-        console.log('DexScreener response:', JSON.stringify(dexResponse.data, null, 2));
-        const pair = dexResponse.data.pairs?.[0];
-        if (pair) {
-          tokenData.name = pair.baseToken?.name || tokenData.name;
-          tokenData.marketCap = pair.fdv || 0;
-          tokenData.liquidity = pair.liquidity?.usd || 0;
-          tokenData.price = pair.priceUsd || 0;
-          break;
-        } else {
-          console.log('No DexScreener pairs found for:', tokenAddress);
-          tokenData.marketCap = 0;
-          tokenData.liquidity = 0;
-          tokenData.price = 0;
-          break;
-        }
-      } catch (error) {
-        console.error('Error fetching DexScreener data, retries left:', retries, 'Error:', error.message, 'Stack:', error.stack);
-        retries--;
-        if (retries === 0) {
-          tokenData.marketCap = 0;
-          tokenData.liquidity = 0;
-          tokenData.price = 0;
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait before retry
-      }
+      tokenData.price = 0;
+      tokenData.liquidity = 0;
+      tokenData.marketCap = 0;
     }
 
     // Fetch dev holding and pool supply
     try {
-      const largestAccounts = await connection.getTokenLargestAccounts(new PublicKey(tokenAddress));
-      const totalSupply = (await connection.getTokenSupply(new PublicKey(tokenAddress))).value.uiAmount;
+      const largestAccounts = await Moralis.Solana.getTokenLargestAccounts({ address: tokenAddress });
+      const totalSupply = (await Moralis.Solana.getTokenSupply({ address: tokenAddress })).amount;
       console.log('Largest accounts:', JSON.stringify(largestAccounts, null, 2));
       console.log('Total supply:', totalSupply);
-      const devHolding = largestAccounts.value[0]?.uiAmount / totalSupply * 100 || 0;
+      const devHolding = largestAccounts[0]?.amount / totalSupply * 100 || 0;
       tokenData.devHolding = devHolding;
       tokenData.poolSupply = totalSupply > 0 ? (totalSupply - devHolding) / totalSupply * 100 : 0;
     } catch (error) {
@@ -167,8 +115,7 @@ const formatTokenMessage = (tokenData) => {
 🏊 *Pool Supply*: ${tokenData.poolSupply ? tokenData.poolSupply.toFixed(2) : 'N/A'}%
 🚀 *Launch Price*: ${tokenData.price ? tokenData.price : 'N/A'} SOL
 🔒 *Mint Authority*: ${tokenData.mintAuthRevoked ? '✅ Revoked' : '❌ Not Revoked'}
-🧊 *Freeze Authority*: ${tokenData.freezeAuthRevoked ? '✅ Revoked' : '❌ Not Revoked'}
-📈 *DexScreener*: [View on DexScreener](https://dexscreener.com/solana/${tokenData.address || ''})`;
+🧊 *Freeze Authority*: ${tokenData.freezeAuthRevoked ? '✅ Revoked' : '❌ Not Revoked'}`;
 
     console.log('Formatted message:', message);
     return message;
