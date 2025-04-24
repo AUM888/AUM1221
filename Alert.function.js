@@ -85,7 +85,7 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
       }
 
       const event = {
-        type: 'TOKEN_MINT',
+        type: 'TOKEN_MINT', // CHANGED TO TOKEN_MINT
         tokenMint,
         programId: pumpFunProgram.toString(),
         accounts: txDetails.transaction.message.accountKeys.map(key => key.pubkey.toString()),
@@ -104,10 +104,10 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
         continue;
       }
 
-      const bypassFilters = process.env.BYPASS_FILTERS === 'true';
-      console.log('Bypass Filters in checkNewTokens:', bypassFilters);
-      console.log('Token Data Before Filter Check:', JSON.stringify(tokenData, null, 2));
-      console.log('Filter Check Result in checkNewTokens:', checkAgainstFilters(tokenData, filters));
+      // Apply bypassFilters logic similar to index.js
+      const bypassFilters = process.env.BYPASS_FILTERS === 'true' || true; // FORCED BYPASS FOR TESTING
+      console.log('Bypass Filters in checkNewTokens:', bypassFilters); // ADDED LOG
+      console.log('Filter Check Result in checkNewTokens:', checkAgainstFilters(tokenData, filters)); // ADDED LOG
 
       if (bypassFilters || checkAgainstFilters(tokenData, filters)) {
         console.log('Token passed filters in checkNewTokens:', JSON.stringify(tokenData, null, 2));
@@ -117,14 +117,7 @@ const checkNewTokens = async (bot, chatId, pumpFunProgram, filters, checkAgainst
         });
       } else {
         console.log('Token did not pass filters in checkNewTokens:', tokenMint, 'Token data:', JSON.stringify(tokenData, null, 2));
-        let failMessage = `ℹ️ Token ${tokenMint} did not pass filters\nDetails:\n`;
-        failMessage += `Liquidity: ${tokenData.liquidity || 0} (Required: ${filters.liquidity.min}-${filters.liquidity.max})\n`;
-        failMessage += `Pool Supply: ${tokenData.poolSupply || 0}% (Required: ${filters.poolSupply.min}-${filters.poolSupply.max})\n`;
-        failMessage += `Dev Holding: ${tokenData.devHolding || 0}% (Required: ${filters.devHolding.min}-${filters.devHolding.max})\n`;
-        failMessage += `Launch Price: ${tokenData.price || 0} SOL (Required: ${filters.launchPrice.min}-${filters.launchPrice.max})\n`;
-        failMessage += `Mint Auth Revoked: ${tokenData.mintAuthRevoked ? 'Yes' : 'No'} (Required: ${filters.mintAuthRevoked ? 'Yes' : 'No'})\n`;
-        failMessage += `Freeze Auth Revoked: ${tokenData.freezeAuthRevoked ? 'Yes' : 'No'} (Required: ${filters.freezeAuthRevoked ? 'Yes' : 'No'})`;
-        bot.sendMessage(chatId, failMessage).catch(err => {
+        bot.sendMessage(chatId, `ℹ️ Token ${tokenMint} did not pass filters`).catch(err => {
           console.error('Failed to send Telegram message for filter fail:', err.message);
         });
       }
