@@ -1,61 +1,43 @@
 require('dotenv').config();
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
-const { Connection, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction, Keypair } = require('@solana/web3.js');
-const { getMint, TOKEN_PROGRAM_ID } = require('@solana/spl-token');
+const Moralis = require('moralis').default;
 
-// Import checkNewTokens from Alert.function.js
-const { checkNewTokens } = require('./Alert.function');
-
-// Function to dynamically load Helper.function.js
-const loadHelperModule = () => {
-  try {
-    console.log('Dynamically loading Helper.function.js...');
-    delete require.cache[require.resolve('./Helper.function')];
-    const helperModule = require('./Helper.function');
-    console.log('Successfully loaded Helper.function.js:', {
-      extractTokenInfo: typeof helperModule.extractTokenInfo,
-      checkAgainstFilters: typeof helperModule.checkAgainstFilters,
-      formatTokenMessage: typeof helperModule.formatTokenMessage
-    });
-    return helperModule;
-  } catch (error) {
-    console.error('Failed to load Helper.function.js:', error);
-    throw new Error('Module load error: Failed to load Helper.function.js');
-  }
-};
+// Import helper functions
+const { extractTokenInfo, checkAgainstFilters, formatTokenMessage } = require('./Helper.function');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const chatId = process.env.TELEGRAM_CHAT_ID || '-1002511600127';
 const webhookBaseUrl = process.env.WEBHOOK_URL?.replace(/\/$/, '');
-const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`, {
-  commitment: 'confirmed',
-  maxSupportedTransactionVersion: 0
-});
 
 // Validate environment variables
-if (!token || !webhookBaseUrl || !process.env.HELIUS_API_KEY || !process.env.PRIVATE_KEY) {
-  console.error('Missing environment variables. Required: TELEGRAM_BOT_TOKEN, WEBHOOK_URL, HELIUS_API_KEY, PRIVATE_KEY');
+if (!token || !webhookBaseUrl || !process.env.MORALIS_API_KEY) {
+  console.error('Missing environment variables. Required: TELEGRAM_BOT_TOKEN, WEBHOOK_URL, MORALIS_API_KEY');
   process.exit(1);
 }
-
-const PUMP_FUN_PROGRAM = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
-const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-console.log('PUMP_FUN_PROGRAM defined:', PUMP_FUN_PROGRAM.toString());
 
 const bot = new TelegramBot(token, { polling: false, request: { retryAfter: 21 } });
 
 app.use(express.json());
 
+// Initialize Moralis
+const initializeMoralis = async () => {
+  await Moralis.start({
+    apiKey: process.env.MORALIS_API_KEY,
+  });
+  console.log('Moralis initialized');
+};
+
 // Set Telegram webhook
 bot.setWebHook(`${webhookBaseUrl}/bot${token}`).then(info => {
   console.log('Webhook set successfully:', info);
 }).catch(error => {
-  console.error('Failed to set Telegram webhook:', error);
+  console.error('Failed togot set Telegram webhook:', error);
 });
 
+// Filter definitions (same as before)
 let filters = {
   liquidity: { min: 4000, max: 25000 },
   poolSupply: { min: 60, max: 95 },
@@ -81,19 +63,10 @@ app.get('/webhook-status', (req, res) => {
   });
 });
 
+// Moralis Webhook Endpoint
 app.post('/webhook', async (req, res) => {
   try {
-    console.log('Webhook endpoint hit'); // ADDED LOG
-    const { extractTokenInfo, checkAgainstFilters, formatTokenMessage } = loadHelperModule();
-    if (typeof extractTokenInfo !== 'function' || typeof checkAgainstFilters !== 'function' || typeof formatTokenMessage !== 'function') {
-      console.error('One or more functions are not defined:', {
-        extractTokenInfo: typeof extractTokenInfo,
-        checkAgainstFilters: typeof checkAgainstFilters,
-        formatTokenMessage: typeof formatTokenMessage
-      });
-      throw new Error('Token check error: Helper functions are not defined');
-    }
-
+    console.log('Webhook endpoint hit');
     const now = Date.now();
     if (now - lastReset > 60000) {
       eventCounter = 0;
@@ -108,90 +81,27 @@ app.post('/webhook', async (req, res) => {
     eventCounter++;
 
     const events = req.body;
-    console.log('Webhook received, events count:', events.length, 'Events:', JSON.stringify(events, null, 2));
+    console.log('Webhook received, events:', JSON.stringify(events, null, 2));
 
     if (!events || !Array.isArray(events) || events.length === 0) {
       console.log('No events in webhook');
       return res.status(400).send('No events received');
     }
 
-    console.log('BYPASS_FILTERS value from env:', process.env.BYPASS_FILTERS); // ADDED LOG
-
     for (const event of events) {
-      console.log('Processing event, type:', event.type, 'programId:', event.programId);
+      console.log('Processing event:', JSON.stringify(event, null, 2));
 
-      if (event.type !== 'TOKEN_MINT') {
-        console.log('Skipping non-TOKEN_MINT event:', event.type);
-        continue;
-      }
-
-      const isPumpFunEvent = event.programId === PUMP_FUN_PROGRAM.toString() ||
-                            event.accounts?.includes(PUMP_FUN_PROGRAM.toString());
-      if (!isPumpFunEvent) {
-        console.log('Skipping non-Pump.fun event:', event.programId, 'Accounts:', event.accounts);
-        continue;
-      }
-
-      let tokenAddress = event.tokenMint;
-      if (!tokenAddress && event.signature) {
-        try {
-          const txDetails = await connection.getParsedTransaction(event.signature, {
-            commitment: 'confirmed',
-            maxSupportedTransactionVersion: 0
-          });
-          console.log('Transaction details for webhook:', JSON.stringify(txDetails, null, 2));
-          const mintInstruction = txDetails?.transaction.message.instructions.find(
-            inst => inst.programId.toString() === TOKEN_PROGRAM.toString()
-          );
-          if (mintInstruction && mintInstruction.accounts && mintInstruction.accounts.length > 0) {
-            tokenAddress = mintInstruction.accounts[0].toString();
-          }
-        } catch (error) {
-          console.error('Error fetching transaction details for webhook:', event.signature, error.message);
-        }
-      }
-
-      console.log('Token address extracted:', tokenAddress);
-
-      if (!tokenAddress || tokenAddress.length < 44 || tokenAddress.length > 45) {
-        console.log('Invalid token address, skipping:', tokenAddress);
-        continue;
-      }
-
-      try {
-        const accountInfo = await connection.getParsedAccountInfo(new PublicKey(tokenAddress));
-        console.log('Account info for token:', tokenAddress, JSON.stringify(accountInfo, null, 2));
-        if (!accountInfo.value || accountInfo.value.owner.toString() !== TOKEN_PROGRAM.toString()) {
-          console.log('Address is not a TOKEN mint account, skipping:', tokenAddress);
-          continue;
-        }
-      } catch (error) {
-        console.error('Error validating token address:', tokenAddress, 'Error:', error.message);
-        continue;
-      }
-
-      try {
-        const mint = await getMint(connection, new PublicKey(tokenAddress));
-        console.log('Mint supply for token:', tokenAddress, 'Supply:', mint.supply.toString());
-        if (mint.supply <= 1) {
-          console.log('Skipping NFT-like token:', tokenAddress);
-          continue;
-        }
-      } catch (error) {
-        console.error('Error checking mint supply for token:', tokenAddress, 'Error:', error.message);
-        continue;
-      }
-
-      const tokenData = await extractTokenInfo({ ...event, tokenMint: tokenAddress });
-      console.log('Extracted Token Data:', JSON.stringify(tokenData, null, 2)); // ADDED LOG
+      // Extract token data using helper function
+      const tokenData = await extractTokenInfo(event);
+      console.log('Extracted Token Data:', JSON.stringify(tokenData, null, 2));
 
       if (!tokenData) {
-        console.log('No valid token data for:', tokenAddress);
-        if (!lastFailedToken || lastFailedToken !== tokenAddress) {
-          bot.sendMessage(chatId, `⚠️ Failed to fetch data for token: ${tokenAddress}`).catch(err => {
+        console.log('No valid token data for:', event.tokenMint);
+        if (!lastFailedToken || lastFailedToken !== event.tokenMint) {
+          bot.sendMessage(chatId, `⚠️ Failed to fetch data for token: ${event.tokenMint}`).catch(err => {
             console.error('Failed to send Telegram message for failed token data:', err.message);
           });
-          lastFailedToken = tokenAddress;
+          lastFailedToken = event.tokenMint;
           await delay(2000);
         }
         continue;
@@ -200,23 +110,16 @@ app.post('/webhook', async (req, res) => {
       tokenData.timestamp = now;
       lastTokenData = tokenData;
 
-      const bypassFilters = process.env.BYPASS_FILTERS === 'true' || true; // FORCED BYPASS FOR TESTING
-      console.log('Bypass Filters:', bypassFilters); // ADDED LOG
-      console.log('Filter Check Result:', checkAgainstFilters(tokenData, filters)); // ADDED LOG
-
-      if (bypassFilters || checkAgainstFilters(tokenData, filters)) {
+      // Apply filters
+      if (checkAgainstFilters(tokenData, filters)) {
         console.log('Token passed filters, sending alert:', tokenData);
         const message = formatTokenMessage(tokenData);
-        console.log('Formatted Message to Send:', message); // ADDED LOG
         await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' }).catch(err => {
           console.error('Failed to send Telegram alert:', err.message, 'Message:', message);
         });
-        if (process.env.AUTO_SNIPE === 'true') {
-          await autoSnipeToken(tokenData.address);
-        }
       } else {
-        console.log('Token did not pass filters:', tokenAddress, 'Token data:', tokenData);
-        bot.sendMessage(chatId, `ℹ️ Token ${tokenAddress} did not pass filters`).catch(err => {
+        console.log('Token did not pass filters:', tokenData.address);
+        bot.sendMessage(chatId, `ℹ️ Token ${tokenData.address} did not pass filters`).catch(err => {
           console.error('Failed to send Telegram message for filter fail:', err.message);
         });
         await delay(2000);
@@ -233,23 +136,12 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
+// Test Webhook Endpoint
 app.post('/test-webhook', async (req, res) => {
   try {
-    const { extractTokenInfo, checkAgainstFilters, formatTokenMessage } = loadHelperModule();
-    if (typeof extractTokenInfo !== 'function' || typeof checkAgainstFilters !== 'function' || typeof formatTokenMessage !== 'function') {
-      console.error('One or more functions are not defined:', {
-        extractTokenInfo: typeof extractTokenInfo,
-        checkAgainstFilters: typeof checkAgainstFilters,
-        formatTokenMessage: typeof formatTokenMessage
-      });
-      throw new Error('Token check error: Helper functions are not defined');
-    }
-
     const mockEvent = {
       type: 'TOKEN_MINT',
       tokenMint: 'TEST_TOKEN_ADDRESS',
-      programId: PUMP_FUN_PROGRAM.toString(),
-      accounts: ['TEST_TOKEN_ADDRESS', PUMP_FUN_PROGRAM.toString()]
     };
     console.log('Received test webhook:', JSON.stringify(mockEvent, null, 2));
     bot.sendMessage(chatId, 'ℹ️ Received test webhook').catch(err => {
@@ -264,7 +156,6 @@ app.post('/test-webhook', async (req, res) => {
       await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' }).catch(err => {
         console.error('Failed to send Telegram test alert:', err.message);
       });
-      console.log('Test alert sent:', tokenData);
       bot.sendMessage(chatId, '✅ Test webhook successful!').catch(err => {
         console.error('Failed to send Telegram test success message:', err.message);
       });
@@ -284,33 +175,7 @@ app.post('/test-webhook', async (req, res) => {
   }
 });
 
-async function autoSnipeToken(tokenAddress) {
-  try {
-    const wallet = Keypair.fromSecretKey(Buffer.from(process.env.PRIVATE_KEY, 'base64'));
-    const amountToBuy = 0.1;
-
-    const transaction = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: wallet.publicKey,
-        toPubkey: new PublicKey(tokenAddress),
-        lamports: amountToBuy * 1e9
-      })
-    );
-
-    const signature = await sendAndConfirmTransaction(connection, transaction, [wallet]);
-    console.log(`Bought token ${tokenAddress} with signature ${signature}`);
-
-    bot.sendMessage(chatId, `✅ Bought token ${tokenAddress} for ${amountToBuy} SOL! Signature: ${signature}`).catch(err => {
-      console.error('Failed to send Telegram auto-snipe message:', err.message);
-    });
-  } catch (error) {
-    console.error('Error auto-sniping token:', error.message);
-    bot.sendMessage(chatId, `❌ Failed to buy token ${tokenAddress}: ${error.message}`).catch(err => {
-      console.error('Failed to send Telegram auto-snipe error message:', err.message);
-    });
-  }
-}
-
+// Telegram Bot Commands (unchanged)
 app.post(`/bot${token}`, (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
@@ -333,7 +198,7 @@ bot.onText(/\/start/, (msg) => {
   });
 });
 
-// Rest of bot logic (callback_query, message handling)
+// Rest of bot logic (callback_query, message handling) - unchanged
 bot.on('callback_query', (callbackQuery) => {
   const msg = callbackQuery.message;
   const data = callbackQuery.data;
@@ -603,31 +468,10 @@ bot.on('message', (msg) => {
 
 app.get('/', (req, res) => res.send('Bot running!'));
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
+  await initializeMoralis();
   console.log(`Server running on port ${PORT}`);
-  const heliusWebhookUrl = webhookBaseUrl.endsWith('/webhook') ? webhookBaseUrl : `${webhookBaseUrl}/webhook`;
-  console.log('Helius Webhook URL:', heliusWebhookUrl);
-  console.log('Starting Helius webhook and periodic monitoring...');
-  bot.sendMessage(chatId, '🚀 Bot started! Waiting for Pump.fun token alerts...').catch(err => {
+  bot.sendMessage(chatId, '🚀 Bot started! Waiting for token alerts...').catch(err => {
     console.error('Failed to send Telegram bot start message:', err.message);
   });
 });
-
-// Periodic check for new tokens
-setInterval(async () => {
-  try {
-    console.log('Running periodic checkNewTokens...');
-    const { checkAgainstFilters } = loadHelperModule();
-    if (typeof checkAgainstFilters !== 'function') {
-      console.error('checkAgainstFilters is not a function in setInterval:', { checkAgainstFilters: typeof checkAgainstFilters });
-      throw new Error('Token check error: checkAgainstFilters is not defined');
-    }
-    await checkNewTokens(bot, chatId, PUMP_FUN_PROGRAM, filters, checkAgainstFilters);
-    console.log('checkNewTokens executed successfully');
-  } catch (error) {
-    console.error('Error in setInterval checkNewTokens:', error.message, 'Stack:', error.stack);
-    bot.sendMessage(chatId, `❌ Error in periodic token check: ${error.message}`).catch(err => {
-      console.error('Failed to send Telegram periodic check error message:', err.message);
-    });
-  }
-}, 300000); // 5 minutes
