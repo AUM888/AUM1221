@@ -43,53 +43,19 @@ const config = {
   port: process.env.PORT || 3000
 };
 
-// Initialize Telegram Bot with webhook mode instead of polling
+// Initialize Telegram Bot
 let bot;
-let isWebhookSet = false;
-
-// Function to initialize the bot
-async function initializeBot() {
-  try {
-    // Create bot instance without polling
-    bot = new TelegramBot(config.telegramToken, { polling: false });
-    
-    // Set webhook if in production environment
-    if (process.env.NODE_ENV === 'production') {
-      const webhookUrl = `${config.heliusWebhookUrl}/telegram-webhook`;
-      
-      // Delete any existing webhook before setting a new one
-      await bot.deleteWebhook();
-      
-      // Set the webhook
-      await bot.setWebhook(webhookUrl);
-      isWebhookSet = true;
-      logger.info(`Telegram webhook set to ${webhookUrl}`);
-    } else {
-      // Use polling only in development
-      await bot.deleteWebhook(); // Make sure no webhook is set
-      bot.startPolling({ restart: true });
-      logger.info('Telegram bot started in polling mode for development');
-    }
-    
-    logger.info('Telegram bot initialized successfully');
-  } catch (error) {
-    logger.error('Failed to initialize Telegram bot:', error);
-    // Try again after a delay
-    setTimeout(initializeBot, 10000);
-  }
+try {
+  bot = new TelegramBot(config.telegramToken, { polling: true });
+  logger.info('Telegram bot initialized successfully');
+} catch (error) {
+  logger.error('Failed to initialize Telegram bot:', error);
+  process.exit(1);
 }
 
 // Initialize Express app for webhook
 const app = express();
 app.use(bodyParser.json());
-
-// Process Telegram webhook updates
-app.post('/telegram-webhook', (req, res) => {
-  if (bot && req.body) {
-    bot.processUpdate(req.body);
-  }
-  res.sendStatus(200);
-});
 
 // Cache for storing token data
 const tokenCache = new Map();
@@ -461,6 +427,14 @@ app.get('/', (req, res) => {
   res.status(200).send('PumpFun Token Tracker Bot is running!');
 });
 
+// Start the Express server
+const server = app.listen(config.port, () => {
+  logger.info(`Server started on port ${config.port}`);
+});
+
+// Start WebSocket connection
+connectToPumportalWebSocket();
+
 // Start command handler
 bot.onText(/\/start/, async (msg) => {
   try {
@@ -513,21 +487,6 @@ process.on('unhandledRejection', (reason, promise) => {
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received. Shutting down gracefully...');
-  
-  // Stop the bot polling/webhook
-  if (bot) {
-    if (isWebhookSet) {
-      bot.deleteWebhook().then(() => {
-        logger.info('Webhook deleted.');
-      });
-    } else {
-      bot.stopPolling().then(() => {
-        logger.info('Polling stopped.');
-      });
-    }
-  }
-  
-  // Close server
   if (server) {
     server.close(() => {
       logger.info('Server closed.');
@@ -538,15 +497,4 @@ process.on('SIGTERM', () => {
   }
 });
 
-// Start the Express server
-const server = app.listen(config.port, () => {
-  logger.info(`Server started on port ${config.port}`);
-  
-  // Initialize the bot after server starts
-  initializeBot();
-  
-  // Start WebSocket connection
-  connectToPumportalWebSocket();
-  
-  logger.info('Bot started successfully');
-});
+logger.info('Bot started successfully');
