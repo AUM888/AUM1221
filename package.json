@@ -1,20 +1,37 @@
 {
-  "name": "aum1221",
+  "name": "pumpfun-token-tracker-bot",
   "version": "1.0.0",
-  "description": "",
+  "description": "Telegram bot to track PumpFun tokens on Solana blockchain in real-time",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
+  "keywords": [
+    "telegram",
+    "bot",
+    "solana",
+    "pumpfun",
+    "token",
+    "tracker"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "axios": "^1.7.7",
-    "dotenv": "^16.4.5",
-    "express": "^4.21.0",
-    "moralis": "^2.22.0",
-    "node-telegram-bot-api": "^0.66.0",
-    "ws": "^8.18.0"
+    "axios": "^1.6.2",
+    "body-parser": "^1.20.2",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "node-schedule": "^2.1.1",
+    "node-telegram-bot-api": "^0.64.0",
+    "winston": "^3.11.0",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 }
