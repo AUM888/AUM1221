@@ -46,7 +46,14 @@ const config = {
 // Initialize Telegram Bot
 let bot;
 try {
-  bot = new TelegramBot(config.telegramToken, { polling: true });
+  bot = new TelegramBot(config.telegramToken, { 
+    polling: true,
+    testEnvironment: false,
+    filepath: false,
+    webHook: false,
+    onlyFirstMatch: false,
+    cancelPollOnCallback: true  // Add this line
+  });
   logger.info('Telegram bot initialized successfully');
 } catch (error) {
   logger.error('Failed to initialize Telegram bot:', error);
