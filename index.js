@@ -348,12 +348,10 @@ bot.on('callback_query', async (query) => {
 // Set up webhook endpoint for receiving Helius events
 app.post('/webhook', async (req, res) => {
   try {
-    // Verify webhook secret if provided
-    const secret = req.headers['x-helius-webhook-secret'];
-    if (config.heliusWebhookSecret && secret !== config.heliusWebhookSecret) {
-      logger.warn('Invalid webhook secret received');
-      return res.status(401).send('Unauthorized');
-    }
+    // Webhook secret check removed from here
+    
+    // Add logging to see incoming webhook data
+    logger.info('Webhook received, body:', JSON.stringify(req.body));
     
     const events = req.body;
     
