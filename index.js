@@ -280,10 +280,10 @@ function shortenAddress(address) {
   return `${address.substring(0, 4)}...${address.substring(address.length - 4)}`;
 }
 
-// Schedule 30-minute alert for top 10 tokens
-schedule.scheduleJob('*/30 * * * *', async () => {
+// Schedule 5-minute alert for top 10 tokens (changed from 30 minutes to 5 minutes)
+schedule.scheduleJob('*/5 * * * *', async () => {
   try {
-    logger.info('Running scheduled 30-minute alert for top 10 tokens');
+    logger.info('Running scheduled 5-minute alert for top 10 tokens');
     
     // Get top 10 tokens by market cap
     const topTokens = Array.from(tokenCache.values())
@@ -296,7 +296,7 @@ schedule.scheduleJob('*/30 * * * *', async () => {
     }
     
     // Send message about top tokens
-    const message = `📊 *Top 10 PumpFun Tokens (30min Update)* 📊\n\n`;
+    const message = `📊 *Top 10 PumpFun Tokens (5min Update)* 📊\n\n`;
     
     await bot.sendMessage(config.chatId, message, {
       parse_mode: 'Markdown'
@@ -355,6 +355,18 @@ app.post('/webhook', async (req, res) => {
     
     const events = req.body;
     
+    // Check if this is a test message from Helius
+    if (isHeliusTestMessage(events)) {
+      logger.info('Helius test webhook received');
+      
+      // Send notification to Telegram about successful webhook test
+      await bot.sendMessage(config.chatId, `✅ *Webhook Test Successful!* ✅\n\nHelius webhook is properly configured and receiving test messages. The bot is ready to track PumpFun tokens!`, {
+        parse_mode: 'Markdown'
+      });
+      
+      return res.status(200).send('OK');
+    }
+    
     for (const event of events) {
       if (event.type === 'TOKEN_MINT' || event.type === 'TOKEN_TRANSFER') {
         // Process token events
@@ -397,9 +409,46 @@ app.post('/webhook', async (req, res) => {
     res.status(200).send('OK');
   } catch (error) {
     logger.error('Error processing webhook:', error);
+    
+    // Send notification to Telegram about webhook error
+    try {
+      await bot.sendMessage(config.chatId, `❌ *Webhook Error!* ❌\n\nThere was an error processing a webhook event from Helius. Please check the server logs for more details.`, {
+        parse_mode: 'Markdown'
+      });
+    } catch (telegramError) {
+      logger.error('Failed to send error notification to Telegram:', telegramError);
+    }
+    
     res.status(500).send('Internal Server Error');
   }
 });
+
+// Helper function to check if the received payload is a Helius test message
+function isHeliusTestMessage(events) {
+  // Check if this is a test message from Helius
+  // Test messages typically have a specific structure or a test flag
+  if (Array.isArray(events) && events.length === 1) {
+    const event = events[0];
+    // Check if it's a test event (Helius typically uses "TEST" or similar in test events)
+    if (event.type === 'TEST' || 
+        (event.description && event.description.includes('test')) ||
+        (event.source && event.source === 'HELIUS_CONSOLE')) {
+      return true;
+    }
+    
+    // If the event has minimal data or seems like a sample event
+    if (Object.keys(event).length <= 3 && (event.type || event.test)) {
+      return true;
+    }
+  }
+  
+  // If the event object itself has a 'test' property set to true
+  if (events && events.test === true) {
+    return true;
+  }
+  
+  return false;
+}
 
 // Helper function to fetch additional token data (price, market cap, etc.)
 async function fetchTokenAdditionalData(tokenAddress) {
@@ -449,6 +498,15 @@ app.get('/', (req, res) => {
 // Start the Express server
 const server = app.listen(config.port, () => {
   logger.info(`Server started on port ${config.port}`);
+  
+  // Send startup notification to Telegram
+  try {
+    bot.sendMessage(config.chatId, `🚀 *PumpFun Token Tracker Bot Started!* 🚀\n\nThe bot is now running and ready to track PumpFun tokens. Server time: ${new Date().toLocaleString()}`, {
+      parse_mode: 'Markdown'
+    });
+  } catch (error) {
+    logger.error('Failed to send startup notification to Telegram:', error);
+  }
 });
 
 // Start WebSocket connection
@@ -459,7 +517,7 @@ bot.onText(/\/start/, async (msg) => {
   try {
     const chatId = msg.chat.id;
     
-    await bot.sendMessage(chatId, `👋 *Welcome to PumpFun Token Tracker!*\n\nThis bot tracks PumpFun tokens on the Solana blockchain in real-time and sends alerts with detailed information. You'll receive updates about new tokens and regular reports on the top 10 tokens every 30 minutes.\n\nUse /help to see available commands.`, {
+    await bot.sendMessage(chatId, `👋 *Welcome to PumpFun Token Tracker!*\n\nThis bot tracks PumpFun tokens on the Solana blockchain in real-time and sends alerts with detailed information. You'll receive updates about new tokens and regular reports on the top 10 tokens every 5 minutes.\n\nUse /help to see available commands.`, {
       parse_mode: 'Markdown'
     });
   } catch (error) {
