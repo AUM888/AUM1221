@@ -33,20 +33,35 @@ if (process.env.NODE_ENV !== 'production') {
 
 // Configuration
 const config = {
-  telegramToken: process.env.TELEGRAM_BOT_TOKEN || '7486200165:AAGYsNj3gIKhx2DbA6amSNxOeRN15EJF1Fw',
-  heliusApiKey: process.env.HELIUS_API_KEY || '2c5f49fe-b93a-4101-8f65-d6fbe8f2be23',
+  telegramToken: process.env.TELEGRAM_BOT_TOKEN,
+  heliusApiKey: process.env.HELIUS_API_KEY,
   heliusWebhookUrl: process.env.HELIUS_WEBHOOK_URL || 'https://aum1221.onrender.com',
   heliusWebhookSecret: process.env.HELIUS_WEBHOOK_SECRET || 'your-webhook-secret',
-  pumportalApiKey: process.env.PUMPORTAL_API_KEY || '6t774d3cb8r52u1kdn4muvb4b5qnjp27754k2vvad5um8mhg6mtn6kkf8xw6advjdnq5jcu9ddr58d21f9bmmt3bcxgq8e2u95uk4e279xd4cka3b5vmrd2jex9m2dkhetd38jbq84ykucx5q4e356h24pvjne9n3at3ac4engppuuta5254bucb90qmhak8trnmda36n0kuf8',
+  pumportalApiKey: process.env.PUMPORTAL_API_KEY,
   pumportalWebsocketUrl: process.env.PUMPORTAL_WEBSOCKET_URL || 'wss://pumpportal.fun/api/data',
-  chatId: process.env.TELEGRAM_CHAT_ID || '-1002668459642',
+  chatId: process.env.TELEGRAM_CHAT_ID,
   port: process.env.PORT || 3000
 };
+
+// Validate required environment variables
+if (!config.telegramToken || !config.heliusApiKey || !config.chatId || !config.pumportalApiKey) {
+  logger.error('Missing required environment variables: TELEGRAM_BOT_TOKEN, HELIUS_API_KEY, TELEGRAM_CHAT_ID, or PUMPORTAL_API_KEY');
+  process.exit(1);
+}
 
 // Initialize Telegram Bot
 let bot;
 try {
-  bot = new TelegramBot(config.telegramToken, { polling: true });
+  bot = new TelegramBot(config.telegramToken, { polling: false }); // Changed to polling: false
+  const WEBHOOK_URL = `${config.heliusWebhookUrl}/bot${config.telegramToken}`;
+  
+  // Set Telegram webhook
+  bot.setWebHook(WEBHOOK_URL).then(() => {
+    logger.info(`Telegram webhook set to ${WEBHOOK_URL}`);
+  }).catch((error) => {
+    logger.error('Failed to set Telegram webhook:', error);
+  });
+  
   logger.info('Telegram bot initialized successfully');
 } catch (error) {
   logger.error('Failed to initialize Telegram bot:', error);
@@ -56,6 +71,12 @@ try {
 // Initialize Express app for webhook
 const app = express();
 app.use(bodyParser.json());
+
+// Telegram webhook endpoint
+app.post(`/bot${config.telegramToken}`, (req, res) => {
+  bot.processUpdate(req.body);
+  res.status(200).send('OK');
+});
 
 // Cache for storing token data
 const tokenCache = new Map();
