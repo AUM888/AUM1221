@@ -368,7 +368,7 @@ app.post('/webhook', async (req, res) => {
     }
     
     for (const event of events) {
-      if (event.type === 'TOKEN_MINT' || event.type === 'TOKEN_TRANSFER') {
+      if (event.type === 'CREATE') {
         // Process token events
         if (event.tokenTransfers && event.tokenTransfers.length > 0) {
           const tokenAddress = event.tokenTransfers[0].mint;
